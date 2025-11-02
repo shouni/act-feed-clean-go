@@ -1,0 +1,21 @@
+package feed
+
+import (
+	"github.com/mmcdole/gofeed"
+)
+
+// ExtractLinks はパースされたフィードから、本文抽出対象のURLリストを抽出します。
+func ExtractLinks(feed *gofeed.Feed) []string {
+	if feed == nil || len(feed.Items) == 0 {
+		return nil
+	}
+
+	urls := make([]string, 0, len(feed.Items))
+	for _, item := range feed.Items {
+		// リンクが存在し、空文字列ではないことを確認
+		if item.Link != "" {
+			urls = append(urls, item.Link)
+		}
+	}
+	return urls
+}
