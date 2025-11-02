@@ -1,0 +1,24 @@
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# macOS
+.DS_Store
+
+# Go Modules Cache
+# ビルド時に生成されるキャッシュやバイナリ
+*.exe
+*.dll
+*.so
+*.o
+*.a
+/bin/
+
+
+/action-perfect-get-on-go.iml
+/.idea/misc.xml
+/.idea/modules.xml
+/.idea/vcs.xml
+/.env
