@@ -64,4 +64,4 @@
 <SCRIPT_END>
 
 --- 元文章 ---
-{{.CombinedText}}
+{{.FinalSummaryText}}

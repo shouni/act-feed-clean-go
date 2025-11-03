@@ -218,7 +218,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	)
 
 	// 4. Pipelineの実行
-	ctx, cancel := context.WithTimeout(ctx, contextTimeout)
+	ctx, cancel = context.WithTimeout(ctx, contextTimeout)
 	defer cancel()
 
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
