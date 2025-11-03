@@ -70,8 +70,6 @@ func NewReducePromptBuilder() *PromptBuilder {
 	return &PromptBuilder{tmpl: tmpl, err: err}
 }
 
-// --- 新規追加のコンストラクタ ---
-
 // NewFinalSummaryPromptBuilder は 最終要約フェーズ用の PromptBuilder を初期化します。
 func NewFinalSummaryPromptBuilder() *PromptBuilder {
 	tmpl, err := template.New("final_summary").Parse(FinalSummaryPromptTemplate)
