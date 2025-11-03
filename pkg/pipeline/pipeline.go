@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -142,10 +141,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "\n--- AI reduceResult生成結果 ---")
-	fmt.Fprintln(os.Stderr, reduceResult)
-	fmt.Fprintln(os.Stderr, "------------------------------------")
-
 	// --- 4-A. Final Summary の実行 ---
 	// フィードの最初のタイトルを仮のタイトルとして使用（例として）
 	title := rssFeed.Title
@@ -159,20 +154,12 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("Final Summaryの生成に失敗しました: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "\n--- AI Final Summary生成結果 ---")
-	fmt.Fprintln(os.Stderr, finalSummary)
-	fmt.Fprintln(os.Stderr, "------------------------------------")
-
 	// --- 4-B. Script Generation の実行 ---
 	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, title, finalSummary)
 	if err != nil {
 		slog.Error("VOICEVOXスクリプトの生成に失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("VOICEVOXスクリプトの生成に失敗しました: %w", err)
 	}
-
-	fmt.Fprintln(os.Stderr, "\n--- AI スクリプト生成結果 ---")
-	fmt.Fprintln(os.Stderr, scriptText)
-	fmt.Fprintln(os.Stderr, "------------------------------------")
 
 	// --- 5. AI処理結果の出力分岐 ---
 	if p.VoicevoxEngine != nil && p.OutputWAVPath != "" {
