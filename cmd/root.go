@@ -42,8 +42,8 @@ var Flags RunFlags
 const (
 	maxRetries            = 3
 	contextTimeout        = 20 * time.Minute
-	maxParallelSegments   = 2
-	defaultSegmentTimeout = 600 * time.Second
+	maxParallelSegments   = voicevox.DefaultMaxParallelSegments
+	defaultSegmentTimeout = voicevox.DefaultSegmentTimeout
 )
 
 // ----------------------------------------------------------------------
@@ -229,9 +229,7 @@ func addRunFlags(runCmd *cobra.Command) {
 	runCmd.Flags().StringVarP(&Flags.LLMAPIKey,
 		"llm-api-key", "k", "", "Gemini APIキー (これが設定されている場合のみAI処理が実行されます)")
 	runCmd.Flags().StringVarP(&Flags.FeedURL,
-		"feed-url", "f", "https://news.yahoo.co.jp/rss/topics/it.xml", "処理対象のRSSフィードURL")
-	//runCmd.Flags().StringVarP(&Flags.FeedURL,
-	//	"feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
+		"feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
 	runCmd.Flags().IntVarP(&Flags.Parallel,
 		"parallel", "p", 10, "Webスクレイピングの最大同時並列リクエスト数")
 	runCmd.Flags().DurationVarP(&Flags.ScrapeTimeout,
