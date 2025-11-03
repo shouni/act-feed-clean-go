@@ -29,8 +29,6 @@ type PipelineConfig struct {
 	OutputWAVPath      string
 	ScrapeTimeout      time.Duration
 	VoicevoxAPITimeout time.Duration
-	MapModelName       string
-	ReduceModelName    string
 }
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
@@ -139,10 +137,30 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
 	combinedTextForAI := cleaner.CombineContents(results)
-	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.config.LLMAPIKey)
+	reduceResult, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI)
 	if err != nil {
 		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
+	}
+
+	// --- 4-A. Final Summary の実行 ---
+	// フィードの最初のタイトルを仮のタイトルとして使用（例として）
+	title := rssFeed.Title
+	if len(rssFeed.Items) > 0 {
+		title = rssFeed.Items[0].Title
+	}
+
+	finalSummary, err := p.Cleaner.GenerateFinalSummary(ctx, title, reduceResult)
+	if err != nil {
+		slog.Error("Final Summaryの生成に失敗しました", slog.String("error", err.Error()))
+		return fmt.Errorf("Final Summaryの生成に失敗しました: %w", err)
+	}
+
+	// --- 4-B. Script Generation の実行 ---
+	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, title, finalSummary)
+	if err != nil {
+		slog.Error("VOICEVOXスクリプトの生成に失敗しました", slog.String("error", err.Error()))
+		return fmt.Errorf("VOICEVOXスクリプトの生成に失敗しました: %w", err)
 	}
 
 	// --- 5. AI処理結果の出力分岐 ---
@@ -158,7 +176,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 			}
 		}
 
-		err := p.VoicevoxEngine.Execute(ctx, structuredText, p.OutputWAVPath)
+		err := p.VoicevoxEngine.Execute(ctx, scriptText, p.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
 		}
@@ -169,7 +187,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// AI処理が実行されたが音声合成が行われない場合、テキスト出力を実行
-	return iohandler.WriteOutput("", []byte(structuredText))
+	return iohandler.WriteOutput("", []byte(scriptText))
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理

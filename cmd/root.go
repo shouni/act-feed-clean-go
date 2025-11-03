@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
@@ -34,14 +35,19 @@ type RunFlags struct {
 	VoicevoxAPITimeout time.Duration
 	MapModelName       string
 	ReduceModelName    string
+	SummaryModelName   string
+	ScriptModelName    string
 }
 
 var Flags RunFlags
 
 const (
-	maxRetries          = 3
-	contextTimeout      = 10 * time.Minute
-	maxParallelSegments = 4
+	maxRetries = 3
+	// contextTimeout は、パイプライン全体の実行に許容される最大時間です。
+	// LLM呼び出しの増加と、より複雑な処理ステップに対応するため、20分に延長されました。
+	contextTimeout        = 20 * time.Minute
+	maxParallelSegments   = voicevox.DefaultMaxParallelSegments
+	defaultSegmentTimeout = voicevox.DefaultSegmentTimeout
 )
 
 // ----------------------------------------------------------------------
@@ -77,8 +83,15 @@ type appDependencies struct {
 	VoicevoxEngine *voicevox.Engine
 }
 
+func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
+	if apiKey != "" {
+		return gemini.NewClient(ctx, gemini.Config{APIKey: apiKey})
+	}
+	return gemini.NewClientFromEnv(ctx)
+}
+
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
-func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
+func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
 
 	// 1. Extractorの初期化
 	extractor, err := extract.NewExtractor(httpClient)
@@ -91,19 +104,22 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
 
 	// 3. Cleanerの初期化
-	mapModel := config.MapModelName
-	if mapModel == "" {
-		mapModel = cleaner.DefaultMapModelName
-	}
-	reduceModel := config.ReduceModelName
-	if reduceModel == "" {
-		reduceModel = cleaner.DefaultReduceModelName
-	}
-	cleanerInstance, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
+	var client *gemini.Client
+	client, err = initLLMClient(ctx, config.LLMAPIKey)
 	if err != nil {
-		slog.Error("クリーナーの初期化に失敗しました", slog.String("error", err.Error()))
-		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
 	}
+
+	// 2. クリーナーの初期化
+	cleanerInstance, err := cleaner.NewCleaner(
+		client,
+		Flags.MapModelName,
+		Flags.ReduceModelName,
+		Flags.SummaryModelName,
+		Flags.ScriptModelName,
+		config.Verbose,
+	)
 
 	// 4. VOICEVOX Engineの初期化
 	var vvEngine *voicevox.Engine
@@ -124,7 +140,7 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 		parser := voicevox.NewTextParser()
 		engineConfig := voicevox.EngineConfig{
 			MaxParallelSegments: maxParallelSegments,
-			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
+			SegmentTimeout:      defaultSegmentTimeout,
 		}
 
 		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
@@ -140,7 +156,12 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
 func runCmdFunc(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
+	// 既存のコンテキストを取得
+	parentCtx := cmd.Context()
+	// 既存のコンテキストから新しいタイムアウトコンテキストを派生させる
+	ctx, cancel := context.WithTimeout(parentCtx, contextTimeout)
+	defer cancel()
+
 	// ログの初期化をここで行う (DIコンポーネントの構築前に実行する必要がある)
 	initLogger()
 
@@ -171,12 +192,10 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		OutputWAVPath:      Flags.OutputWAVPath,
 		ScrapeTimeout:      Flags.ScrapeTimeout,
 		VoicevoxAPITimeout: Flags.VoicevoxAPITimeout,
-		MapModelName:       Flags.MapModelName,
-		ReduceModelName:    Flags.ReduceModelName,
 	}
 
 	// 2. 依存関係の構築（ヘルパー関数に委譲）
-	deps, err := newAppDependencies(httpClient, config)
+	deps, err := newAppDependencies(ctx, httpClient, config)
 	if err != nil {
 		// エラーは newAppDependencies 内でログ出力されているため、シンプルにエラーを返す
 		return err
@@ -193,9 +212,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	)
 
 	// 4. Pipelineの実行
-	ctx, cancel := context.WithTimeout(ctx, contextTimeout)
-	defer cancel()
-
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
 }
 
@@ -221,6 +237,10 @@ func addRunFlags(runCmd *cobra.Command) {
 		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ReduceModelName,
 		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
+	runCmd.Flags().StringVar(&Flags.SummaryModelName,
+		"summary-model", cleaner.DefaultSummaryModelName, "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
+	runCmd.Flags().StringVar(&Flags.ScriptModelName,
+		"script-model", cleaner.DefaultScriptModelName, "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
 var runCmd = &cobra.Command{
