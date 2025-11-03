@@ -241,13 +241,13 @@ func addRunFlags(runCmd *cobra.Command) {
 
 	// AIモデル名オプションの追加
 	runCmd.Flags().StringVar(&Flags.MapModelName,
-		"map-model", "gemini-2.5-flash", "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
+		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ReduceModelName,
-		"reduce-model", "gemini-2.5-flash", "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
+		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
 	runCmd.Flags().StringVar(&Flags.SummaryModelName,
-		"summary-model", "gemini-2.5-flash", "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
+		"summary-model", cleaner.DefaultSummaryModelName, "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ScriptModelName,
-		"script-model", "gemini-2.5-flash", "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
+		"script-model", cleaner.DefaultScriptModelName, "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
 var runCmd = &cobra.Command{
