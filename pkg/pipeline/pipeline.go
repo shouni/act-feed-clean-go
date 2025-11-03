@@ -35,18 +35,18 @@ type PipelineConfig struct {
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
-	// 依存関係 (Public fields first, grouped by type/purpose)
+	// 依存関係 (Public fields)
 	Client         *httpkit.Client
 	Extractor      *extract.Extractor
 	Scraper        scraper.Scraper
 	Cleaner        *cleaner.Cleaner
 	VoicevoxEngine *voicevox.Engine
 
-	// 設定値
-	config PipelineConfig // 設定値への参照を保持
+	// 設定値 (Private)
+	config PipelineConfig
 
-	// 出力パス
-	OutputWAVPath string // 音声合成後の出力ファイルパス
+	// 出力パス (Public)
+	OutputWAVPath string
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
