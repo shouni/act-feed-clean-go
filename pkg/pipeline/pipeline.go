@@ -53,7 +53,7 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string, v
 			if a.Key == slog.TimeKey {
 				return slog.Attr{}
 			}
-			a.Value = slog.StringValue(strings.ToUpper(a.Value.String()))
+			// 修正1: グローバルな大文字変換を削除し、可読性を向上
 			return a
 		},
 	})
@@ -175,16 +175,10 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// LLMAPIKeyがない、またはVOICEVOXエンジンが未設定の場合、テキスト出力処理へ
-	if p.LLMAPIKey == "" || (p.VoicevoxEngine == nil && p.OutputWAVPath != "") {
-		if p.LLMAPIKey != "" && p.VoicevoxEngine == nil {
-			slog.Warn("LLM処理は実行されますが、VOICEVOX API設定がないためWAVファイルは出力されません。")
-		}
-
-		if p.LLMAPIKey == "" {
-			slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
-			return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
-		}
+	// 修正2: LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力
+	if p.LLMAPIKey == "" {
+		slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
+		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
 	}
 
 	// --- 4. AI処理の実行 (Cleanerによる Map-Reduce) ---
@@ -207,13 +201,16 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
 		}
 		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.OutputWAVPath)
+
+		// 修正3: 音声合成が成功したら、以降のテキスト出力処理をスキップしてここで終了
+		return nil
 	}
 
 	// --- 5-B. テキスト出力にフォールバック (従来の処理) ---
 	slog.Info("AI生成スクリプトをテキストとして出力します", slog.String("mode", "AI構造化済み (テキスト)"))
 
-	//	return iohandler.WriteOutput("", []byte(structuredText))
-	return nil
+	// 修正4: AI処理が実行されたが音声合成が行われない場合、テキスト出力を実行
+	return iohandler.WriteOutput("", []byte(structuredText))
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理 (変更なし)
@@ -249,5 +246,6 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
+	// iohandler.WriteOutputの第二引数が string を受け取る前提
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
