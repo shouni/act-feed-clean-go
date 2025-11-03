@@ -3,54 +3,57 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	// 外部ライブラリ
-	"github.com/shouni/go-http-kit/pkg/httpkit" // 記憶しているクライアント
+	clibase "github.com/shouni/go-cli-base"
+	"github.com/shouni/go-utils/iohandler"
+	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	// 内部パッケージ
-	"act-feed-clean-go/pkg/extract"   // 記憶している抽出ロジック
-	"act-feed-clean-go/pkg/feed"      // 今回作成したフィードロジック
-	"act-feed-clean-go/pkg/iohandler" // 記憶している入出力ロジック
+	// 必要な依存関係
+	"act-feed-clean-go/pkg/feed"
+	"github.com/shouni/go-http-kit/pkg/httpkit"
+	//	"github.com/shouni/go-utils/iohandler"
+	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
-const (
-	// CLIオプションで上書き可能だが、ここではデフォルト値を定義
-	defaultFeedURL         = "https://news.yahoo.co.jp/rss/categories/it.xml"
-	maxParallelism         = 10 // 以前のREADMEで定義されていたデフォルト値
-	scraperTimeout         = 15 * time.Second
-	totalProcessingTimeout = 60 * time.Second
-)
+// (前略: RunFlags, Flags, ExtractedArticle の定義はそのまま)
 
-// ExtractedArticle は並列処理の結果を保持するための構造体
+// RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
+type RunFlags struct {
+	LLMAPIKey     string
+	FeedURL       string
+	Parallel      int
+	ScrapeTimeout time.Duration
+}
+
+var Flags RunFlags
+
+// ExtractedArticle は並列処理の結果を保持するための構造体 (runFeedExtraction内で使用)
 type ExtractedArticle struct {
 	URL     string
 	Content string
 	Error   error
 }
 
-// runFeedExtraction は、RSSフィードの取得から本文の並列抽出までを実行するメインロジックです。
-// 実際にはCobraのRunEなどに設定されます。
-func runFeedExtraction(feedURL string) error {
-	// 処理全体のコンテキストを設定
-	ctx, cancel := context.WithTimeout(context.Background(), totalProcessingTimeout)
+// runFeedExtraction の本体（並列抽出ロジック）を cmd パッケージ内に定義します。
+func runFeedExtraction(feedURL string, parallel int, scrapeTimeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // 全体タイムアウト
 	defer cancel()
 
 	// 1. クライアントとエクストラクタの初期化
-	// 記憶している httpkit の Config を利用
-	clientConfig := httpkit.Config{
-		RetryMax:    3, // リトライ回数を定義 (例: 3回)
-		HTTPTimeout: scraperTimeout,
-	}
-	// httpkit.NewClient でリトライ機能付きクライアントを初期化
-	httpClient := httpkit.NewClient(clientConfig)
+	const maxRetries = 3
 
-	// extract.NewExtractor で本文抽出器を初期化（クライアントをDI）
-	extractor := extract.NewExtractor(httpClient)
+	// timeoutを第1引数に渡し、WithMaxRetriesでリトライ回数を設定します
+	clientOptions := []httpkit.ClientOption{
+		httpkit.WithMaxRetries(maxRetries),
+	}
+	httpClient := httpkit.New(scrapeTimeout, clientOptions...)
+	extractor, nil := extract.NewExtractor(httpClient)
 
 	// 2. RSSフィードの取得とURLリスト生成
 	rssFeed, err := feed.FetchAndParse(ctx, httpClient, feedURL)
@@ -63,38 +66,40 @@ func runFeedExtraction(feedURL string) error {
 		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
 	}
 
-	fmt.Fprintf(os.Stderr, "🌐 記事URL %d件を最大並列数 %d で本文抽出中...\n", len(urlsToProcess), maxParallelism)
+	fmt.Fprintf(os.Stderr, "🌐 記事URL %d件を最大並列数 %d で本文抽出中...\n", len(urlsToProcess), parallel)
 
 	// 3. 並列抽出の実行 (セマフォ制御)
-	sem := semaphore.NewWeighted(int64(maxParallelism)) // 並列数を制御
+	sem := semaphore.NewWeighted(int64(parallel))
 	var wg sync.WaitGroup
 	results := make(chan ExtractedArticle, len(urlsToProcess))
 
+	// (並列処理ロジックは前回の実装とほぼ同じ)
 	for _, url := range urlsToProcess {
 		wg.Add(1)
 		go func(url string) {
 			defer wg.Done()
-
-			// セマフォ取得 (並列数制限)
 			if err := sem.Acquire(ctx, 1); err != nil {
 				results <- ExtractedArticle{URL: url, Error: fmt.Errorf("セマフォ取得失敗: %w", err)}
 				return
 			}
 			defer sem.Release(1)
-
-			// 抽出処理を実行
-			content, err := extractor.FetchAndExtractText(ctx, url)
+			content, hasBodyFound, err := extractor.FetchAndExtractText(url, ctx)
+			var extractErr error
+			if err != nil {
+				extractErr = fmt.Errorf("コンテンツの抽出に失敗しました: %w", err)
+			} else if content == "" || !hasBodyFound {
+				extractErr = fmt.Errorf("URL %s から有効な本文を抽出できませんでした", url)
+			}
+			log.Print(extractErr)
 
 			results <- ExtractedArticle{URL: url, Content: content, Error: err}
 		}(url)
 	}
-
 	wg.Wait()
 	close(results)
 
 	// 4. 結果の結合と出力準備
 	var combinedTextBuilder strings.Builder
-	// トップレベルの見出しとしてフィードタイトルを使用
 	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", rssFeed.Title))
 	successCount := 0
 
@@ -103,47 +108,61 @@ func runFeedExtraction(feedURL string) error {
 			fmt.Fprintf(os.Stderr, "❌ 抽出失敗 [%s]: %v\n", res.URL, res.Error)
 			continue
 		}
-
-		// 結合テキストに追加 (以前記憶していた抽出プレフィックスルールを適用)
-		combinedTextBuilder.WriteString(fmt.Sprintf("## 【記事タイトル】 %s\n\n", res.URL)) // 見出しレベルを#2に統一
+		combinedTextBuilder.WriteString(fmt.Sprintf("## 【記事タイトル】 %s\n\n", res.URL))
 		combinedTextBuilder.WriteString(res.Content)
-		combinedTextBuilder.WriteString("\n\n---\n\n") // 記事間のセパレータ
+		combinedTextBuilder.WriteString("\n\n---\n\n")
 		successCount++
 	}
-
 	fmt.Fprintf(os.Stderr, "✅ 抽出完了。成功件数: %d / 処理件数: %d\n", successCount, len(urlsToProcess))
 
-	// 5. 結合テキストの出力（AI処理を省略し、iohandlerへ直接渡す）
+	// 5. 結合テキストの出力
 	if combinedTextBuilder.Len() > 0 {
-		// ここで最終的にAIクリーンアップロジックが挟まれる
-		// 簡略化のため、直接 io.handlerに出力
-		return iohandler.WriteOutput("", combinedTextBuilder.String())
+		return iohandler.WriteOutput("", []byte(combinedTextBuilder.String()))
 	}
 
 	return nil
 }
 
-// ----------------------------------------------------
-// Note: 実際のCobra実装では、以下のようにRunE内で上記の関数を呼び出します。
-/*
-var rootCmd = &cobra.Command{
-    Use:   "act-feed-clean-go",
-    Short: "RSSフィードを取得し、AIでクリーンアップします",
+// runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
+func runCmdFunc(cmd *cobra.Command, args []string) error {
+	// APIキーのチェック（簡略化）
+	if Flags.LLMAPIKey == "" {
+		Flags.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
+		if Flags.LLMAPIKey == "" {
+			return fmt.Errorf("エラー: LLM APIキーが設定されていません。-kフラグまたはGEMINI_API_KEY環境変数を設定してください。")
+		}
+	}
+
+	// 解決策: 定義した runFeedExtraction を呼び出す
+	return runFeedExtraction(Flags.FeedURL, Flags.Parallel, Flags.ScrapeTimeout)
+}
+
+// (後略: addRunFlags, runCmd, Execute の定義はそのまま)
+
+// addRunFlags は 'run' コマンドに固有のフラグを設定します。
+func addRunFlags(runCmd *cobra.Command) {
+	runCmd.Flags().StringVarP(&Flags.LLMAPIKey, "llm-api-key", "k", "", "Gemini APIキー (環境変数 GEMINI_API_KEY が優先)")
+	runCmd.Flags().StringVarP(&Flags.FeedURL, "feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
+	runCmd.Flags().IntVarP(&Flags.Parallel, "parallel", "p", 10, "Webスクレイピングの最大同時並列リクエスト数")
+	runCmd.Flags().DurationVarP(&Flags.ScrapeTimeout, "scraper-timeout", "s", 15*time.Second, "WebスクレイピングのHTTPタイムアウト時間")
 }
 
 var runCmd = &cobra.Command{
-    Use:   "run",
-    Short: "フィードの取得と本文抽出を実行",
-    RunE: func(cmd *cobra.Command, args []string) error {
-		// CLIオプションからURLを取得するロジックをここに記述
-        return runFeedExtraction(defaultFeedURL) // 例: ハードコード値を使用
-    },
+	Use:   "run",
+	Short: "RSSフィードの取得、並列抽出、AIクリーンアップを実行します。",
+	Long:  "RSSフィードからURLを抽出し、記事本文を並列で取得後、AIで構造化・クリーンアップします。",
+	RunE:  runCmdFunc,
 }
 
+// Execute は、CLIアプリケーションのエントリポイントです。
 func Execute() {
-    rootCmd.AddCommand(runCmd)
-    if err := rootCmd.Execute(); err != nil {
-        os.Exit(1)
-    }
+	// runCmd にフラグを追加
+	addRunFlags(runCmd)
+
+	clibase.Execute(
+		"act-feed-clean-go",
+		nil,
+		nil,
+		runCmd,
+	)
 }
-*/
