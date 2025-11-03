@@ -58,7 +58,7 @@
 
 1.  **堅牢な抽出**: **自動リトライ**、**セマフォ制御**、および**不正データ検出**により、並列処理環境での記事本文取得の安定性を実現します。
 2.  **RSSフィード対応**: RSSフィードのURLを指定するだけで、自動的にそこに含まれる記事URLを抽出し、並列処理を開始します。
-3.  **AI構造化 (Map-Reduce)**: Gemini APIを利用し、大量の記事本文をセグメントに分割（Mapフェーズ）、並列で処理し、最終的に統合・構造化（Reduceフェーズ）します。
+3.  **AI構造化 (Map-Reduce)**: Gemini APIを利用し、大量の記事本文をセグメントに分割（Mapフェーズ）、並列で処理し、最終的に統合・構造化（Reduceフェーズ）します。**各フェーズで使用するAIモデルを指定可能**です。
 4.  **音声合成機能 (VOICEVOX連携)**: AIによって構造化されたスクリプトを、VOICEVOXエンジンに送信し、複数のオーディオデータを結合して**単一のWAVファイル**として出力します。
 
 -----
@@ -91,7 +91,9 @@ AI処理や音声合成を実行する際には、以下の環境変数または
 | `--scraper-timeout` | `-s` | Webスクレイピングの**HTTPタイムアウト時間**。 | `15s` |
 | `--llm-api-key` | `-k` | Gemini APIキー。**これが設定されている場合のみAI処理が実行されます。** | |
 | `--voicevox-api-url` | (なし) | **VOICEVOXエンジンのAPI URL**。環境変数からも読み込みます。 | |
-| --output-wav-path | -v | 音声合成されたWAVファイルの出力パス。このフラグと`--voicevox-api-url`が設定されている場合にWAVファイルが出力されます。 | `asset/audio_output.wav` |
+| `--output-wav-path` | `-v` | 音声合成されたWAVファイルの出力パス。このフラグと`--voicevox-api-url`が設定されている場合にWAVファイルが出力されます。 | `asset/audio_output.wav` |
+| **`--map-model`** | (なし) | **Mapフェーズ（記事のクリーンアップ・要約）に使用するAIモデル名**。 | `gemini-2.5-flash` |
+| **`--reduce-model`** | (なし) | **Reduceフェーズ（最終スクリプト生成）に使用するAIモデル名**。精度重視なら`gemini-2.5-pro`を推奨。 | `gemini-2.5-flash` |
 
 -----
 
@@ -134,11 +136,18 @@ export GEMINI_API_KEY="YOUR_API_KEY"
 export VOICEVOX_API_URL="http://127.0.0.1:50021"
 
 ./bin/actfeedclean run -v "asset/audio_output.wav"
+```
 
-# または、フラグを使用してすべて指定 (カスタムパスを使用する場合)
-./bin/actfeedclean run -k "ANOTHER_API_KEY" \
+### 例 5: Map/Reduceフェーズに異なるカスタムAIモデルを指定して実行 ✨ **NEW**
+
+```bash
+# Mapフェーズには高速な'flash'、Reduceフェーズには高品質な'pro'モデルを指定
+./bin/actfeedclean run \
+  -k "ANOTHER_API_KEY" \
+  --map-model "gemini-2.5-flash" \
+  --reduce-model "gemini-2.5-pro" \
   --voicevox-api-url "http://127.0.0.1:50021" \
-  -v "custom_output/audio.wav"
+  -v "custom_output/high_quality_script.wav"
 ```
 
 -----
@@ -146,5 +155,3 @@ export VOICEVOX_API_URL="http://127.0.0.1:50021"
 ### 📜 ライセンス (License)
 
 このプロジェクトは [MIT License](https://opensource.org/licenses/MIT) の下で公開されています。
-
-
