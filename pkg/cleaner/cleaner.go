@@ -160,7 +160,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	intermediateSummaries, err := c.processSegmentsInParallel(ctx, c.client, segments)
 	if err != nil {
 		// このエラーは Map-Reduce の最初のReduceが実行される前の、中間要約の結合テキストになる
-		return "", fmt.Errorf("セグメント処理（Mapフェーズ）に失敗しました: %w", err)
+		return "", fmt.Errorf("コンテンツのセグメント処理（Mapフェーズ）中にエラーが発生しました: %w", err)
 	}
 
 	// 4. Reduceフェーズの準備：中間要約の結合
@@ -239,8 +239,11 @@ func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, f
 
 	// 抽出に失敗した場合の処理（例: LLMがタグを出力しなかった場合）
 	if scriptText == "" {
-		// LLMがタグを出力しなかった、または形式が不正だった場合、元のテキストを試す
-		slog.Warn("スクリプトマーカー抽出失敗。LLMのレスポンス全体を返します。")
+		slog.Warn("指定されたスクリプトマーカーが見つからないか、形式が不正です。LLMのレスポンス全体をスクリプトとして使用します。",
+			slog.String("startTag", "SCRIPT_START"),
+			slog.String("endTag", "SCRIPT_END"),
+			slog.String("llm_response_prefix", response.Text[:min(len(response.Text), 100)]), // レスポンスの一部をログに出力
+		)
 		return response.Text, nil
 	}
 

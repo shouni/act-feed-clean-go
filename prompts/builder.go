@@ -92,8 +92,8 @@ func (b *PromptBuilder) Err() error {
 
 // BuildMap は MapTemplateData を埋め込み、プロンプト文字列を完成させます。
 func (b *PromptBuilder) BuildMap(data MapTemplateData) (string, error) {
-	if b.tmpl == nil || b.err != nil {
-		return "", fmt.Errorf("Map prompt template is not properly initialized: %w", b.err)
+	if err := b.Err(); err != nil { // b.Err() を使用
+		return "", fmt.Errorf("Map prompt template is not properly initialized: %w", err)
 	}
 
 	if data.SegmentText == "" {
@@ -110,8 +110,8 @@ func (b *PromptBuilder) BuildMap(data MapTemplateData) (string, error) {
 
 // BuildReduce は ReduceTemplateData を埋め込み、プロンプト文字列を完成させます。
 func (b *PromptBuilder) BuildReduce(data ReduceTemplateData) (string, error) {
-	if b.tmpl == nil || b.err != nil {
-		return "", fmt.Errorf("Reduce prompt template is not properly initialized: %w", b.err)
+	if err := b.Err(); err != nil { // b.Err() を使用
+		return "", fmt.Errorf("Reduce prompt template is not properly initialized: %w", err)
 	}
 
 	if data.CombinedText == "" {
@@ -128,8 +128,8 @@ func (b *PromptBuilder) BuildReduce(data ReduceTemplateData) (string, error) {
 
 // BuildFinalSummary は FinalSummaryTemplateData を埋め込み、プロンプト文字列を完成させます。
 func (b *PromptBuilder) BuildFinalSummary(data FinalSummaryTemplateData) (string, error) {
-	if b.tmpl == nil || b.err != nil {
-		return "", fmt.Errorf("Final Summary prompt template is not properly initialized: %w", b.err)
+	if err := b.Err(); err != nil { // b.Err() を使用
+		return "", fmt.Errorf("FinalSummary prompt template is not properly initialized: %w", err)
 	}
 
 	if data.IntermediateSummary == "" {
@@ -146,8 +146,8 @@ func (b *PromptBuilder) BuildFinalSummary(data FinalSummaryTemplateData) (string
 
 // BuildScript は ScriptTemplateData を埋め込み、プロンプト文字列を完成させます。
 func (b *PromptBuilder) BuildScript(data ScriptTemplateData) (string, error) {
-	if b.tmpl == nil || b.err != nil {
-		return "", fmt.Errorf("Script prompt template is not properly initialized: %w", b.err)
+	if err := b.Err(); err != nil { // b.Err() を使用
+		return "", fmt.Errorf("Script prompt template is not properly initialized: %w", err)
 	}
 
 	if data.FinalSummaryText == "" {

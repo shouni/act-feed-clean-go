@@ -87,7 +87,8 @@ func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
 }
 
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
-func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
+// func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
+func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
 
 	// 1. Extractorの初期化
 	extractor, err := extract.NewExtractor(httpClient)
@@ -110,7 +111,6 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 	}
 
 	var client *gemini.Client
-	ctx := context.Background()
 	client, err = initLLMClient(ctx, config.LLMAPIKey)
 	if err != nil {
 		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
@@ -198,7 +198,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. 依存関係の構築（ヘルパー関数に委譲）
-	deps, err := newAppDependencies(httpClient, config)
+	deps, err := newAppDependencies(context.Background(), httpClient, config)
 	if err != nil {
 		// エラーは newAppDependencies 内でログ出力されているため、シンプルにエラーを返す
 		return err
