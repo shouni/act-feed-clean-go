@@ -6,8 +6,9 @@ import (
 
 // ExtractLinks はパースされたフィードから、本文抽出対象のURLリストを抽出します。
 func ExtractLinks(feed *gofeed.Feed) []string {
+	// 【修正点】nil ではなく空のスライス []string{} を返すように変更
 	if feed == nil || len(feed.Items) == 0 {
-		return nil
+		return []string{}
 	}
 
 	urls := make([]string, 0, len(feed.Items))
