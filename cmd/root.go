@@ -238,9 +238,9 @@ func addRunFlags(runCmd *cobra.Command) {
 	runCmd.Flags().StringVar(&Flags.ReduceModelName,
 		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
 	runCmd.Flags().StringVar(&Flags.SummaryModelName,
-		"summary-model", cleaner.DefaultSummaryModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
+		"summary-model", cleaner.DefaultSummaryModelName, "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ScriptModelName,
-		"script-model", cleaner.DefaultScriptModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
+		"script-model", cleaner.DefaultScriptModelName, "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
 var runCmd = &cobra.Command{
