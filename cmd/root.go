@@ -20,12 +20,13 @@ import (
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
 type RunFlags struct {
-	LLMAPIKey      string
-	FeedURL        string
-	Parallel       int
-	ScrapeTimeout  time.Duration
-	VoicevoxAPIURL string
-	OutputWAVPath  string
+	LLMAPIKey          string
+	FeedURL            string
+	Parallel           int
+	ScrapeTimeout      time.Duration
+	VoicevoxAPIURL     string
+	OutputWAVPath      string
+	VoicevoxAPITimeout time.Duration
 }
 
 var Flags RunFlags
@@ -46,25 +47,28 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		Flags.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
 	}
 
-	// NOTE: LLMAPIKeyやVoicevoxAPIURLがない場合はAI処理や音声化がスキップされるため、ここでエラーにはしない。
-
 	// 1. HTTPクライアントの初期化
 	const maxRetries = 3
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
-	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
+	// スクレ―ピングとVOICEVOXクライアントでタイムアウトが異なるため、ここでは基盤となるタイムアウトは使用しない
+	// タイムアウトは各パイプライン内で設定される
+	httpClient := httpkit.New(0, clientOptions...)
+
+	// 💡 修正1: PipelineConfig 構造体を組み立て
+	config := pipeline.PipelineConfig{
+		Parallel:           Flags.Parallel,
+		Verbose:            clibase.Flags.Verbose,
+		LLMAPIKey:          Flags.LLMAPIKey,
+		VoicevoxAPIURL:     Flags.VoicevoxAPIURL,
+		OutputWAVPath:      Flags.OutputWAVPath,
+		ScrapeTimeout:      Flags.ScrapeTimeout,
+		VoicevoxAPITimeout: Flags.VoicevoxAPITimeout,
+	}
 
 	// 2. Pipelineの初期化と依存性の注入
-	pipelineInstance, err := pipeline.New(
-		httpClient,
-		Flags.Parallel,
-		clibase.Flags.Verbose,
-		Flags.LLMAPIKey,
-		Flags.VoicevoxAPIURL,
-		Flags.OutputWAVPath,
-		Flags.ScrapeTimeout, // 新しく追加した引数
-	)
+	pipelineInstance, err := pipeline.New(httpClient, config)
 	if err != nil {
 		// Extractor, Cleanerの初期化エラーなどを捕捉
 		return fmt.Errorf("パイプラインの初期化に失敗しました: %w", err)
@@ -90,6 +94,8 @@ func addRunFlags(runCmd *cobra.Command) {
 		"scraper-timeout", "s", 15*time.Second, "WebスクレイピングのHTTPタイムアウト時間")
 	runCmd.Flags().StringVar(&Flags.VoicevoxAPIURL,
 		"voicevox-api-url", "", "VOICEVOXエンジンのAPI URL。環境変数 VOICEVOX_API_URL から読み込みます。")
+	runCmd.Flags().DurationVar(&Flags.VoicevoxAPITimeout, // 💡 新しいフラグ
+		"voicevox-api-timeout", 30*time.Second, "VOICEVOX API (audio_query, synthesis) のHTTPタイムアウト時間")
 	runCmd.Flags().StringVarP(&Flags.OutputWAVPath,
 		"output-wav-path", "v", "asset/audio_output.wav", "音声合成されたWAVファイルの出力パス。このフラグと--voicevox-api-urlが設定されている場合、WAVファイルが出力されます。")
 }
