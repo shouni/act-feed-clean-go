@@ -189,10 +189,6 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	return finalResponse.Text, nil
 }
 
-// ----------------------------------------------------------------
-// 新規追加の LLM 処理メソッド
-// ----------------------------------------------------------------
-
 // GenerateFinalSummary は、中間統合要約を元に、簡潔な最終要約を生成します。
 func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, intermediateSummary string) (string, error) {
 	slog.Info("Final Summary Generation（最終要約）を開始します。")
