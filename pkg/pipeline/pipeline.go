@@ -20,6 +20,16 @@ import (
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
+type PipelineConfig struct {
+	Parallel           int
+	Verbose            bool
+	LLMAPIKey          string
+	VoicevoxAPIURL     string
+	OutputWAVPath      string
+	ScrapeTimeout      time.Duration
+	VoicevoxAPITimeout time.Duration
+}
+
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
 	Client    *httpkit.Client
@@ -33,18 +43,18 @@ type Pipeline struct {
 	OutputWAVPath  string // 音声合成後の出力ファイルパス
 
 	// 設定値
+	// Configから渡されるようになったため、フィールドは削減可能だが、ここでは互換性のため残す
 	Parallel  int
 	Verbose   bool
 	LLMAPIKey string // LLM処理のためにAPIキーを保持
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-// voicevoxAPIURLとoutputWAVPathはcmd/root.goから渡されます。
-// 今回の修正では、voicevox.NewEngineがcontextを直接受け取らないと仮定し、依存関係を組み立てます。
-func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string, voicevoxAPIURL string, outputWAVPath string, scrapeTimeout time.Duration) (*Pipeline, error) {
-	// ログ設定: slog.Handlerの選択と設定 (変更なし)
+// 💡 修正1: New関数の引数を PipelineConfig 構造体一つに集約
+func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
+	// ログ設定: slog.Handlerの選択と設定
 	logLevel := slog.LevelInfo
-	if verbose {
+	if config.Verbose {
 		logLevel = slog.LevelDebug
 	}
 
@@ -54,7 +64,7 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string, v
 			if a.Key == slog.TimeKey {
 				return slog.Attr{}
 			}
-			// 修正1: グローバルな大文字変換を削除し、可読性を向上
+			// グローバルな大文字変換を削除し、可読性を向上
 			return a
 		},
 	})
@@ -67,26 +77,26 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string, v
 	}
 
 	// 2. Scraperの初期化 (変更なし)
-	parallelScraper := scraper.NewParallelScraper(extractor, parallel)
+	parallelScraper := scraper.NewParallelScraper(extractor, config.Parallel)
 
 	// 3. Cleanerの初期化 (変更なし)
 	const defaultMapModel = cleaner.DefaultModelName
 	const defaultReduceModel = cleaner.DefaultModelName
-	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, verbose)
+	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, config.Verbose)
 	if err != nil {
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
 
 	// 4. VOICEVOX Engineの初期化
 	var vvEngine *voicevox.Engine
-	if voicevoxAPIURL != "" {
-		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", voicevoxAPIURL))
+	if config.VoicevoxAPIURL != "" {
+		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
 
-		// NewClientは(apiURL string, timeout time.Duration)を受け取る前提で修正
-		vvClient := voicevox.NewClient(voicevoxAPIURL, scrapeTimeout)
+		// 💡 修正2: VOICEVOXクライアントに専用の VoicevoxAPITimeout を使用
+		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
-		// 話者データ Load (Run関数でロードするのが理想だが、NewEngineが*SpeakerDataを要求するためNew内でロード)
-		loadCtx, cancel := context.WithTimeout(context.Background(), scrapeTimeout)
+		// 話者データ Load には ScrapeTimeout を使用（Webからのデータ取得という点で共通）
+		loadCtx, cancel := context.WithTimeout(context.Background(), config.ScrapeTimeout)
 		defer cancel()
 
 		// voicevox.LoadSpeakers は voicevox.Engine が依存する speakerData を取得
@@ -101,8 +111,7 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string, v
 			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
 		}
 
-		// 1-4. Engineの組み立てとExecutorとしての返却
-		// 修正: ブロック外で定義された vvEngine に代入する ( := ではなく = )
+		// Engineの組み立てとExecutorとしての返却
 		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
 	}
 
@@ -113,11 +122,11 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string, v
 		Cleaner:   llmCleaner,
 
 		VoicevoxEngine: vvEngine,
-		OutputWAVPath:  outputWAVPath,
+		OutputWAVPath:  config.OutputWAVPath,
 
-		Parallel:  parallel,
-		Verbose:   verbose,
-		LLMAPIKey: llmAPIKey,
+		Parallel:  config.Parallel,
+		Verbose:   config.Verbose,
+		LLMAPIKey: config.LLMAPIKey,
 	}, nil
 }
 
@@ -176,7 +185,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// 修正2: LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力
+	// LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力
 	if p.LLMAPIKey == "" {
 		slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
 		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
@@ -198,7 +207,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		// --- 5-A. VOICEVOXによる音声合成とWAV出力 ---
 		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.OutputWAVPath))
 
-		// 新規追加: ディレクトリの存在確認と作成
+		// ディレクトリの存在確認と作成
 		outputDir := filepath.Dir(p.OutputWAVPath)
 		if outputDir != "." { // カレントディレクトリでない場合のみ
 			if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -212,14 +221,14 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		}
 		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.OutputWAVPath)
 
-		// 修正3: 音声合成が成功したら、以降のテキスト出力処理をスキップしてここで終了
+		// 音声合成が成功したら、以降のテキスト出力処理をスキップしてここで終了
 		return nil
 	}
 
 	// --- 5-B. テキスト出力にフォールバック (従来の処理) ---
 	slog.Info("AI生成スクリプトをテキストとして出力します", slog.String("mode", "AI構造化済み (テキスト)"))
 
-	// 修正4: AI処理が実行されたが音声合成が行われない場合、テキスト出力を実行
+	// AI処理が実行されたが音声合成が行われない場合、テキスト出力を実行
 	return iohandler.WriteOutput("", []byte(structuredText))
 }
 
@@ -256,6 +265,7 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	// iohandler.WriteOutputの第二引数が string を受け取る前提
+	// 💡 修正3: コメントを正確な情報に修正 (iohandler.WriteOutputは []byte を受け取る)
+	// iohandler.WriteOutputの第二引数は []byte を受け取ります。
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
