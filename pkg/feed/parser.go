@@ -3,8 +3,8 @@ package feed
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"os"
 
 	"github.com/shouni/go-http-kit/pkg/httpkit"
 
@@ -13,7 +13,7 @@ import (
 
 // FetchAndParse の引数を *httpkit.Client ポインタ型に変更
 func FetchAndParse(ctx context.Context, client *httpkit.Client, feedURL string) (*gofeed.Feed, error) {
-	fmt.Fprintln(os.Stderr, "📰 RSSフィードを取得・パース中:", feedURL)
+	slog.Info("RSSフィードを取得・パース中", slog.String("url", feedURL))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {

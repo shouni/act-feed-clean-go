@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -196,6 +197,15 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	if p.VoicevoxEngine != nil && p.OutputWAVPath != "" {
 		// --- 5-A. VOICEVOXによる音声合成とWAV出力 ---
 		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.OutputWAVPath))
+
+		// 新規追加: ディレクトリの存在確認と作成
+		outputDir := filepath.Dir(p.OutputWAVPath)
+		if outputDir != "." { // カレントディレクトリでない場合のみ
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				return fmt.Errorf("出力ディレクトリの作成に失敗しました (%s): %w", outputDir, err)
+			}
+		}
+
 		err := p.VoicevoxEngine.Execute(ctx, structuredText, p.OutputWAVPath, voicevox.VvTagNormal)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
