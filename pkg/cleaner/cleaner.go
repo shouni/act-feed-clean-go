@@ -68,13 +68,30 @@ type PromptManager struct {
 	// 必要に応じて、configも保持できますが、ここでは初期化時にモデル名を使用
 }
 
-func NewPromptManager() *PromptManager {
+func NewPromptManager() (*PromptManager, error) {
+	mapBuilder := prompts.NewMapPromptBuilder()
+	if err := mapBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Map プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+	reduceBuilder := prompts.NewReducePromptBuilder()
+	if err := reduceBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Reduce プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+	finalSummaryBuilder := prompts.NewFinalSummaryPromptBuilder()
+	if err := finalSummaryBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Final Summary プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+	scriptBuilder := prompts.NewScriptPromptBuilder()
+	if err := scriptBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Script プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+
 	return &PromptManager{
 		MapBuilder:          prompts.NewMapPromptBuilder(),
 		ReduceBuilder:       prompts.NewReducePromptBuilder(),
 		FinalSummaryBuilder: prompts.NewFinalSummaryPromptBuilder(),
 		ScriptBuilder:       prompts.NewScriptPromptBuilder(),
-	}
+	}, nil
 }
 
 // NewCleaner は新しいCleanerインスタンスを作成し、依存関係とPromptBuilderを初期化します。
@@ -99,7 +116,10 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 	}
 
 	// PromptManagerを構築
-	manager := NewPromptManager()
+	manager, err := NewPromptManager() // config引数はここでは不要（元のコードに従う）
+	if err != nil {
+		return nil, fmt.Errorf("PromptManagerの初期化に失敗しました: %w", err)
+	}
 
 	return &Cleaner{
 		client: client, // 注入
