@@ -142,6 +142,10 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
 	}
 
+	fmt.Fprintln(os.Stderr, "\n--- AI reduceResult生成結果 ---")
+	fmt.Fprintln(os.Stderr, reduceResult)
+	fmt.Fprintln(os.Stderr, "------------------------------------")
+
 	// --- 4-A. Final Summary の実行 ---
 	// フィードの最初のタイトルを仮のタイトルとして使用（例として）
 	title := rssFeed.Title
