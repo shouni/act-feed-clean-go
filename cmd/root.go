@@ -78,6 +78,13 @@ type appDependencies struct {
 	VoicevoxEngine *voicevox.Engine
 }
 
+func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
+	if apiKey != "" {
+		return gemini.NewClient(ctx, gemini.Config{APIKey: apiKey})
+	}
+	return gemini.NewClientFromEnv(ctx)
+}
+
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
 func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
 
@@ -103,12 +110,7 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 
 	var client *gemini.Client
 	ctx := context.Background()
-	if config.LLMAPIKey != "" {
-		client, err = gemini.NewClient(ctx, gemini.Config{APIKey: Flags.LLMAPIKey})
-	} else {
-		client, err = gemini.NewClientFromEnv(ctx)
-	}
-
+	client, err = initLLMClient(ctx, config.LLMAPIKey)
 	if err != nil {
 		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)

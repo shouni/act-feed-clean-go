@@ -210,6 +210,7 @@ func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, interm
 	if err != nil {
 		return "", fmt.Errorf("LLM Final Summary処理（最終要約）に失敗しました: %w", err)
 	}
+	slog.Info("Final Summary Generation（最終要約）が完了しました。", slog.Int("summary_length", len(response.Text)))
 
 	return response.Text, nil
 }
