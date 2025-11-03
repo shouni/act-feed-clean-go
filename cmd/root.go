@@ -3,7 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/slog" // ログのためにslogを追加
+	"log/slog"
 	"os"
 	"time"
 
@@ -22,7 +22,6 @@ import (
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
 type RunFlags struct {
-	Verbose            bool
 	LLMAPIKey          string
 	FeedURL            string
 	Parallel           int
@@ -40,13 +39,11 @@ var Flags RunFlags
 // Cobra コマンド定義
 // ----------------------------------------------------------------------
 
-// runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
-func runCmdFunc(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-
-	// slog の初期化
+// initLogger はアプリケーションのデフォルトロガーを設定します。
+func initLogger() {
 	logLevel := slog.LevelInfo
-	if Flags.Verbose { // Flags.Verbose は PipelineConfig.Verbose に対応
+	// clibase のグローバルな Verbose フラグに依存
+	if clibase.Flags.Verbose {
 		logLevel = slog.LevelDebug
 	}
 
@@ -54,13 +51,23 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		Level: logLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
+				// ログサービス (例: Cloud Logging) がタイムスタンプを自動付与するため、
+				// 重複を避ける目的でタイムスタンプを削除します。
 				return slog.Attr{}
 			}
+			// Timeキー以外の属性はそのまま返す
 			return a
 		},
 	})
 	slog.SetDefault(slog.New(handler))
-	slog.Debug("slogを初期化しました", slog.String("level", logLevel.String()))
+	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
+}
+
+// runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
+func runCmdFunc(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	// ログの初期化をここで行う (DIコンポーネントの構築前に実行する必要がある)
+	initLogger()
 
 	// APIキーのチェック（環境変数から取得を試みる）
 	if Flags.LLMAPIKey == "" {
@@ -72,8 +79,8 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		Flags.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
 	}
 
-	// 1. HTTPクライアントの初期化 (リトライ機能付きのクライアントを使用)
-	// NOTE: clibase.NewHTTPClient() が利用可能ならそちらを使用するが、ここでは httpkit.New を直接使用
+	// 1. HTTPクライアントの初期化
+	// TODO: clibase.NewHTTPClient() が利用可能になったら、そちらに切り替えることを検討
 	const maxRetries = 3
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
@@ -96,11 +103,9 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. 依存関係の構築 (DIの準備)
-	// 新しい NewPipelineDependencies を呼び出し、全ての依存関係を構築
 	extractor, scraper, cleaner, vvEngine, err := pipeline.NewPipelineDependencies(httpClient, config)
 	if err != nil {
 		slog.Error("パイプライン依存関係の構築に失敗しました", slog.String("error", err.Error()))
-		// VOICEVOX話者ロード失敗など、初期化時の致命的なエラーをここで捕捉
 		return fmt.Errorf("パイプライン依存関係の構築に失敗しました: %w", err)
 	}
 
@@ -115,9 +120,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	)
 
 	// 4. Pipelineの実行
-	// Run自体に内部タイムアウト機構（ScrapeTimeoutなど）が含まれているため、
-	// ここでの WithTimeout は全体実行時間の上限として残します。
-	// NOTE: context.Background() ではなく、cmd.Context() を使用
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
