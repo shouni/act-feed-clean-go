@@ -90,8 +90,8 @@ func addRunFlags(runCmd *cobra.Command) {
 		"scraper-timeout", "s", 15*time.Second, "WebスクレイピングのHTTPタイムアウト時間")
 	runCmd.Flags().StringVar(&Flags.VoicevoxAPIURL,
 		"voicevox-api-url", "", "VOICEVOXエンジンのAPI URL。環境変数 VOICEVOX_API_URL から読み込みます。")
-	runCmd.Flags().StringVar(&Flags.OutputWAVPath,
-		"output-wav-path", "v", "音声合成されたWAVファイルの出力パス。このフラグと--voicevox-api-urlが設定されている場合、WAVファイルが出力されます。")
+	runCmd.Flags().StringVarP(&Flags.OutputWAVPath,
+		"output-wav-path", "v", "assert/categories.wav", "音声合成されたWAVファイルの出力パス。このフラグと--voicevox-api-urlが設定されている場合、WAVファイルが出力されます。")
 }
 
 var runCmd = &cobra.Command{
