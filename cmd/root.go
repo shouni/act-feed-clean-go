@@ -36,7 +36,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	// APIキーのチェック（AI処理スキップ中は使用されないため、チェックを緩和）
 	if Flags.LLMAPIKey == "" {
 		Flags.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
-		// キーがなくても実行続行
 	}
 
 	// 1. HTTPクライアントの初期化 (Pipelineへの依存性注入の準備)
@@ -44,23 +43,19 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
-	// フラグで指定されたタイムアウトを使用
 	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
 
 	// 2. Pipelineの初期化と依存性の注入
-	// HTTPクライアントと並列数をPipelineに渡す
-	pipelineInstance, err := pipeline.New(httpClient, Flags.Parallel)
+	// 修正: clibase.Flags.Verbose の値を取得して渡す
+	pipelineInstance, err := pipeline.New(httpClient, Flags.Parallel, clibase.Flags.Verbose)
 	if err != nil {
-		// Extractorの初期化エラーなどを捕捉
 		return fmt.Errorf("パイプラインの初期化に失敗しました: %w", err)
 	}
 
 	// 3. Pipelineの実行
-	// 実行コンテキストと全体タイムアウトを設定
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// ロジック全体を Pipeline.Run に委譲
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
 }
 
@@ -82,11 +77,10 @@ var runCmd = &cobra.Command{
 // Execute は、CLIアプリケーションのエントリポイントです。
 func Execute() {
 	addRunFlags(runCmd)
-	// clibase.Execute を使用して、ルートコマンドとサブコマンドをシンプルに実行
 	clibase.Execute(
 		"act-feed-clean-go",
-		nil, // ルート共通フラグの追加はなし
-		nil, // 実行前処理はなし
+		nil,
+		nil,
 		runCmd,
 	)
 }

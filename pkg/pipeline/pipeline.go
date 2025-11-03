@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	clibase "github.com/shouni/go-cli-base"
 	"golang.org/x/sync/semaphore"
 
 	"act-feed-clean-go/pkg/feed"
@@ -39,11 +38,12 @@ type Pipeline struct {
 
 	// 設定値
 	Parallel int
+	Verbose  bool // 修正: Verboseフラグを追加
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-// cmd/root.go から呼び出され、httpClientと並列数を渡されます。
-func New(client *httpkit.Client, parallel int) (*Pipeline, error) {
+// cmd/root.go から呼び出され、httpClient、並列数、verboseフラグを渡されます。
+func New(client *httpkit.Client, parallel int, verbose bool) (*Pipeline, error) { // 修正: verbose引数を追加
 	// ExtractorはClientに依存するため、ここで初期化してDIする
 	extractor, err := extract.NewExtractor(client)
 	if err != nil {
@@ -54,6 +54,7 @@ func New(client *httpkit.Client, parallel int) (*Pipeline, error) {
 		Client:    client,
 		Extractor: extractor,
 		Parallel:  parallel,
+		Verbose:   verbose,
 	}, nil
 }
 
@@ -106,8 +107,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 				finalErr = fmt.Errorf("URL %s から有効な本文を抽出できませんでした", article.URL)
 			}
 
-			// Verboseログ出力は clibase.Flags.Verbose に依存
-			if finalErr != nil && clibase.Flags.Verbose {
+			if finalErr != nil && p.Verbose {
 				log.Printf("抽出エラー [%s] (%s): %v", article.Title, article.URL, finalErr)
 			}
 
