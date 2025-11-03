@@ -15,5 +15,4 @@
 **重要:** 出力は必ず以下の **<CLEANUP_START>** と **<CLEANUP_END>** のマーカーで囲み、内部にはクリーンアップされたMarkdownテキストのみを含めてください。このマーカーやMarkdownテキスト以外の説明は一切含めないでください。
 
 <CLEANUP_START>
-ここにクリーンアップされたMarkdownテキストを出力
 <CLEANUP_END>

@@ -60,13 +60,13 @@ func (b *PromptBuilder) BuildMap(data MapTemplateData) (string, error) {
 		return "", fmt.Errorf("Map prompt template is not properly initialized: %w", b.err)
 	}
 
+	if data.SegmentText == "" {
+		return "", fmt.Errorf("Mapプロンプト実行失敗: SegmentTextが空です (template: %s)", b.tmpl.Name())
+	}
+
 	var sb strings.Builder
 	if err := b.tmpl.Execute(&sb, data); err != nil {
 		return "", fmt.Errorf("Mapプロンプトの実行に失敗しました: %w", err)
-	}
-
-	if data.SegmentText == "" {
-		return "", fmt.Errorf("Mapプロンプト実行失敗: SegmentTextが空です (template: %s)", b.tmpl.Name())
 	}
 
 	return sb.String(), nil
@@ -78,13 +78,13 @@ func (b *PromptBuilder) BuildReduce(data ReduceTemplateData) (string, error) {
 		return "", fmt.Errorf("Reduce prompt template is not properly initialized: %w", b.err)
 	}
 
+	if data.CombinedText == "" {
+		return "", fmt.Errorf("Reduceプロンプト実行失敗: CombinedTextが空です (template: %s)", b.tmpl.Name())
+	}
+
 	var sb strings.Builder
 	if err := b.tmpl.Execute(&sb, data); err != nil {
 		return "", fmt.Errorf("Reduceプロンプトの実行に失敗しました: %w", err)
-	}
-
-	if data.CombinedText == "" {
-		return "", fmt.Errorf("Reduceプロンプト実行失敗: CombinedTextが空です (template: %s)", b.tmpl.Name())
 	}
 
 	return sb.String(), nil
