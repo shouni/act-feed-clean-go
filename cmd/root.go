@@ -198,7 +198,10 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. 依存関係の構築（ヘルパー関数に委譲）
-	deps, err := newAppDependencies(context.Background(), httpClient, config)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel()
+
+	deps, err := newAppDependencies(ctx, httpClient, config)
 	if err != nil {
 		// エラーは newAppDependencies 内でログ出力されているため、シンプルにエラーを返す
 		return err
