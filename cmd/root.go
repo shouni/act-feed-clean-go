@@ -112,12 +112,19 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 	}
 
 	// 2. クリーナーの初期化
+	// CleanerConfig 構造体を構築
+	cleanerConfig := cleaner.CleanerConfig{
+		MapModel:     Flags.MapModelName,
+		ReduceModel:  Flags.ReduceModelName,
+		SummaryModel: Flags.SummaryModelName,
+		ScriptModel:  Flags.ScriptModelName,
+		Verbose:      config.Verbose,
+	}
+
+	// 新しいシグネチャで NewCleaner を呼び出す
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
-		Flags.MapModelName,
-		Flags.ReduceModelName,
-		Flags.SummaryModelName,
-		Flags.ScriptModelName,
+		cleanerConfig,
 		config.Verbose,
 	)
 
@@ -234,13 +241,13 @@ func addRunFlags(runCmd *cobra.Command) {
 
 	// AIモデル名オプションの追加
 	runCmd.Flags().StringVar(&Flags.MapModelName,
-		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
+		"map-model", "gemini-2.5-flash", "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ReduceModelName,
-		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
+		"reduce-model", "gemini-2.5-flash", "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
 	runCmd.Flags().StringVar(&Flags.SummaryModelName,
-		"summary-model", cleaner.DefaultSummaryModelName, "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
+		"summary-model", "gemini-2.5-flash", "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ScriptModelName,
-		"script-model", cleaner.DefaultScriptModelName, "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
+		"script-model", "gemini-2.5-flash", "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
 var runCmd = &cobra.Command{

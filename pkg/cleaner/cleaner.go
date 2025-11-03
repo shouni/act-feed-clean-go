@@ -25,24 +25,6 @@ const DefaultSeparator = "\n\n"
 const MaxSegmentChars = 400000
 
 // ----------------------------------------------------------------
-// モデル名定数の定義
-// ----------------------------------------------------------------
-
-const DefaultModelName = "gemini-2.5-flash"
-
-// DefaultMapModelName は Mapフェーズのデフォルトモデル名です。
-const DefaultMapModelName = DefaultModelName
-
-// DefaultReduceModelName は Reduceフェーズのデフォルトモデル名です。
-const DefaultReduceModelName = DefaultModelName
-
-// DefaultSummaryModelName は FinalSummaryフェーズのデフォルトモデル名です。 (新規)
-const DefaultSummaryModelName = DefaultModelName
-
-// DefaultScriptModelName は ScriptGenerationフェーズのデフォルトモデル名です。 (新規)
-const DefaultScriptModelName = DefaultModelName
-
-// ----------------------------------------------------------------
 // Cleaner 構造体とコンストラクタ
 // ----------------------------------------------------------------
 
@@ -53,32 +35,23 @@ type Cleaner struct {
 	reduceBuilder       *prompts.PromptBuilder
 	finalSummaryBuilder *prompts.PromptBuilder
 	scriptBuilder       *prompts.PromptBuilder
-	MapModelName        string
-	ReduceModelName     string
-	SummaryModelName    string
-	ScriptModelName     string
+	config              CleanerConfig
 	Verbose             bool
+}
+
+type CleanerConfig struct {
+	MapModel     string // Mapフェーズで使用するGeminiモデル名
+	ReduceModel  string // Reduceフェーズで使用するGeminiモデル名
+	SummaryModel string // FinalSummaryフェーズで使用するGeminiモデル名
+	ScriptModel  string // ScriptGenerationフェーズで使用するGeminiモデル名
+	Verbose      bool   // 詳細ログを有効にするか
 }
 
 // NewCleaner は新しいCleanerインスタンスを作成し、依存関係とPromptBuilderを初期化します。
 // 修正: クライアントインスタンスと全モデル名を受け取ります。
-func NewCleaner(client *gemini.Client, mapModel, reduceModel, summaryModel, scriptModel string, verbose bool) (*Cleaner, error) {
+func NewCleaner(client *gemini.Client, config CleanerConfig, verbose bool) (*Cleaner, error) {
 	if client == nil {
 		return nil, fmt.Errorf("LLMクライアントはnilであってはなりません")
-	}
-
-	// デフォルト値の設定
-	if mapModel == "" {
-		mapModel = DefaultMapModelName
-	}
-	if reduceModel == "" {
-		reduceModel = DefaultReduceModelName
-	}
-	if summaryModel == "" {
-		summaryModel = DefaultSummaryModelName
-	}
-	if scriptModel == "" {
-		scriptModel = DefaultScriptModelName
 	}
 
 	mapBuilder := prompts.NewMapPromptBuilder()
@@ -108,10 +81,7 @@ func NewCleaner(client *gemini.Client, mapModel, reduceModel, summaryModel, scri
 		reduceBuilder:       reduceBuilder,
 		finalSummaryBuilder: finalSummaryBuilder, // 新規追加
 		scriptBuilder:       scriptBuilder,       // 新規追加
-		MapModelName:        mapModel,
-		ReduceModelName:     reduceModel,
-		SummaryModelName:    summaryModel, // 新規追加
-		ScriptModelName:     scriptModel,  // 新規追加
+		config:              config,
 		Verbose:             verbose,
 	}, nil
 }
@@ -179,7 +149,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	}
 
 	// Reduceフェーズのモデル名に c.ReduceModelName を使用
-	finalResponse, err := c.client.GenerateContent(ctx, finalPrompt, c.ReduceModelName)
+	finalResponse, err := c.client.GenerateContent(ctx, finalPrompt, c.config.ReduceModel)
 	if err != nil {
 		return "", fmt.Errorf("LLM Reduce処理（中間統合要約）に失敗しました: %w", err)
 	}
@@ -204,7 +174,7 @@ func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, interm
 	}
 
 	// SummaryModelName を使用
-	response, err := c.client.GenerateContent(ctx, prompt, c.SummaryModelName)
+	response, err := c.client.GenerateContent(ctx, prompt, c.config.SummaryModel)
 	if err != nil {
 		return "", fmt.Errorf("LLM Final Summary処理（最終要約）に失敗しました: %w", err)
 	}
@@ -228,7 +198,7 @@ func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, f
 	}
 
 	// ScriptModelName を使用
-	response, err := c.client.GenerateContent(ctx, prompt, c.ScriptModelName)
+	response, err := c.client.GenerateContent(ctx, prompt, c.config.ScriptModel)
 	if err != nil {
 		return "", fmt.Errorf("LLM Script Generation処理に失敗しました: %w", err)
 	}
@@ -387,7 +357,7 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 			}
 
 			// Mapフェーズのモデル名に c.MapModelName を使用
-			response, err := client.GenerateContent(ctx, prompt, c.MapModelName)
+			response, err := client.GenerateContent(ctx, prompt, c.config.MapModel)
 
 			if err != nil {
 				resultsChan <- struct {
