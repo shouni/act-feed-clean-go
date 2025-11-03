@@ -91,7 +91,7 @@ AI処理や音声合成を実行する際には、以下の環境変数または
 | `--scraper-timeout` | `-s` | Webスクレイピングの**HTTPタイムアウト時間**。 | `15s` |
 | `--llm-api-key` | `-k` | Gemini APIキー。**これが設定されている場合のみAI処理が実行されます。** | |
 | `--voicevox-api-url` | (なし) | **VOICEVOXエンジンのAPI URL**。環境変数からも読み込みます。 | |
-| `--output-wav-path` | **`-v`** | 音声合成された**WAVファイルの出力パス**。このフラグと`--voicevox-api-url`が設定されている場合にWAVファイルが出力されます。 | `oasset/audio_output.wav` |
+| --output-wav-path | -v | 音声合成されたWAVファイルの出力パス。このフラグと`--voicevox-api-url`が設定されている場合にWAVファイルが出力されます。 | `asset/audio_output.wav` |
 
 -----
 
@@ -129,16 +129,16 @@ export GEMINI_API_KEY="YOUR_API_KEY"
 ```bash
 # 事前にVOICEVOX Engineを起動しておく (デフォルト: http://127.0.0.1:50021)
 
-# 環境変数でキーとURLを指定し、WAV出力パスを指定して実行
-export GEMINI_API_KEY="YOUR_API_KEY" 
+# 環境変数でキーとURLを指定し、WAV出力パスを指定して実行 (デフォルトパスを使用)
+export GEMINI_API_KEY="YOUR_API_KEY"
 export VOICEVOX_API_URL="http://127.0.0.1:50021"
 
-./bin/actfeedclean run -v "output/audio.wav"
+./bin/actfeedclean run -v "asset/audio_output.wav"
 
-# または、フラグを使用してすべて指定
+# または、フラグを使用してすべて指定 (カスタムパスを使用する場合)
 ./bin/actfeedclean run -k "ANOTHER_API_KEY" \
-    --voicevox-api-url "http://127.0.0.1:50021" \
-    -v "output/audio.wav"
+  --voicevox-api-url "http://127.0.0.1:50021" \
+  -v "custom_output/audio.wav"
 ```
 
 -----
