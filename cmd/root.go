@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	clibase "github.com/shouni/go-cli-base"
+	"github.com/shouni/go-cli-base"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 	"github.com/spf13/cobra"
@@ -149,7 +149,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 1. HTTPクライアントの初期化
-	// TODO: clibase.NewHTTPClient() が利用可能になったら、そちらに切り替えることを検討
 	const maxRetries = 3
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
