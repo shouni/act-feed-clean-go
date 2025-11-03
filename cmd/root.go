@@ -117,7 +117,7 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 
 		parser := voicevox.NewTextParser()
 		engineConfig := voicevox.EngineConfig{
-			MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
+			MaxParallelSegments: 4,
 			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
 		}
 

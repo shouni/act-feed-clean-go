@@ -158,7 +158,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 			}
 		}
 
-		err := p.VoicevoxEngine.Execute(ctx, structuredText, p.OutputWAVPath, voicevox.VvTagNormal)
+		err := p.VoicevoxEngine.Execute(ctx, structuredText, p.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
 		}
