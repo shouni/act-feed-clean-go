@@ -432,3 +432,21 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 
 	return summaries, nil
 }
+
+// ExtractTitleFromMarkdown は、Markdownテキストの最初の # 見出しの内容を抽出します。
+// 例: "# 新しい技術の動向" -> "新しい技術の動向"
+func ExtractTitleFromMarkdown(markdownText string) string {
+	lines := strings.Split(markdownText, "\n")
+	for _, line := range lines {
+		// 先頭が "# " で始まる行を探す
+		if strings.HasPrefix(line, "# ") {
+			// "# " を取り除き、前後のスペースをトリム
+			title := strings.TrimSpace(line[2:])
+			if title != "" {
+				return title
+			}
+		}
+	}
+	// 見つからない場合は空文字列を返す
+	return ""
+}

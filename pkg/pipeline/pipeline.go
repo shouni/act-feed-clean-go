@@ -142,10 +142,17 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// --- 4-A. Final Summary の実行 ---
-	// フィードの最初のタイトルを仮のタイトルとして使用（例として）
-	title := rssFeed.Title
-	if len(rssFeed.Items) > 0 {
-		title = rssFeed.Items[0].Title
+	// ReduceResultには、AIが生成した最も適切なタイトル（# 見出し）が含まれているはずです。
+	title := cleaner.ExtractTitleFromMarkdown(reduceResult)
+
+	// 抽出に失敗した場合（保険として）
+	if title == "" {
+		slog.Warn("AIによるタイトル抽出に失敗しました。フィードのタイトルを代替として使用します。", slog.String("fallback_title", rssFeed.Title))
+		title = rssFeed.Title
+		if len(rssFeed.Items) > 0 {
+			// フィードタイトルも不十分なら最初のアイテムのタイトルを緊急で使用
+			title = rssFeed.Items[0].Title
+		}
 	}
 
 	finalSummary, err := p.Cleaner.GenerateFinalSummary(ctx, title, reduceResult)
