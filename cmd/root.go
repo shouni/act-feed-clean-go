@@ -38,6 +38,12 @@ type RunFlags struct {
 
 var Flags RunFlags
 
+const (
+	maxRetries          = 3
+	contextTimeout      = 10 * time.Minute
+	maxParallelSegments = 4
+)
+
 // ----------------------------------------------------------------------
 // Cobra コマンド定義
 // ----------------------------------------------------------------------
@@ -117,7 +123,7 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 
 		parser := voicevox.NewTextParser()
 		engineConfig := voicevox.EngineConfig{
-			MaxParallelSegments: 4,
+			MaxParallelSegments: maxParallelSegments,
 			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
 		}
 
@@ -149,7 +155,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 1. HTTPクライアントの初期化
-	const maxRetries = 3
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
@@ -188,7 +193,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	)
 
 	// 4. Pipelineの実行
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, contextTimeout)
 	defer cancel()
 
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
