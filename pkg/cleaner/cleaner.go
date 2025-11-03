@@ -28,17 +28,19 @@ const MaxSegmentChars = 400000
 // モデル名定数の定義
 // ----------------------------------------------------------------
 
+const DefaultModelName = "gemini-2.5-flash"
+
 // DefaultMapModelName は Mapフェーズのデフォルトモデル名です。
-const DefaultMapModelName = "gemini-2.5-flash"
+const DefaultMapModelName = DefaultModelName
 
 // DefaultReduceModelName は Reduceフェーズのデフォルトモデル名です。
-const DefaultReduceModelName = "gemini-2.5-flash"
+const DefaultReduceModelName = DefaultModelName
 
 // DefaultSummaryModelName は FinalSummaryフェーズのデフォルトモデル名です。 (新規)
-const DefaultSummaryModelName = "gemini-2.5-flash"
+const DefaultSummaryModelName = DefaultModelName
 
 // DefaultScriptModelName は ScriptGenerationフェーズのデフォルトモデル名です。 (新規)
-const DefaultScriptModelName = "gemini-2.5-flash"
+const DefaultScriptModelName = DefaultModelName
 
 // ----------------------------------------------------------------
 // Cleaner 構造体とコンストラクタ
