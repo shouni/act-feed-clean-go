@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	// 組み込みmax関数を使用するため、mathパッケージのimportは不要
 
 	"act-feed-clean-go/pkg/types"
 
@@ -24,7 +25,7 @@ const DefaultSeparator = "\n\n"
 const MaxSegmentChars = 400000
 
 // ----------------------------------------------------------------
-// Cleaner 構造体とコンストラクタ (変更なし)
+// Cleaner 構造体とコンストラクタ
 // ----------------------------------------------------------------
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
@@ -67,12 +68,11 @@ func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 }
 
 // ----------------------------------------------------------------
-// メインロジック (変更なし)
+// メインロジック
 // ----------------------------------------------------------------
 
 // CombineContents は、成功した抽出結果の本文を効率的に結合します。
 func CombineContents(results []types.URLResult) string {
-	// ... (関数本体は変更なし)
 	var builder strings.Builder
 
 	// 成功した結果のみをフィルタリング
@@ -145,12 +145,11 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 }
 
 // ----------------------------------------------------------------
-// ヘルパー関数群 (segmentTextは変更なし)
+// ヘルパー関数群
 // ----------------------------------------------------------------
 
 // segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
 func (c *Cleaner) segmentText(text string, maxChars int) []string {
-	// ... (関数本体は変更なし)
 	var segments []string
 	current := []rune(text)
 
@@ -189,6 +188,7 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 		// 3. 意味的な区切り文字（句読点、スペース）を探し、より自然な場所で分割
 		if !separatorFound {
 			const lookback = 50
+			// 修正: 組み込みmax()関数を使用
 			start := max(0, len(segmentCandidateRunes)-lookback)
 
 			lastMeaningfulBreak := -1
@@ -220,14 +220,6 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 	}
 
 	return segments
-}
-
-// max は2つの整数のうち大きい方を返すヘルパー関数 (Go 1.20未満の互換性のため)
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // processSegmentsInParallel は Mapフェーズを並列処理します。
@@ -280,7 +272,7 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 	wg.Wait()
 	close(resultsChan)
 
-	// 修正: エラー蓄積ロジックを導入
+	// エラー蓄積ロジック
 	var summaries []string
 	var errorMessages []string
 
