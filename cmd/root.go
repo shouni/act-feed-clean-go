@@ -44,8 +44,8 @@ var Flags RunFlags
 
 // initLogger はアプリケーションのデフォルトロガーを設定します。
 func initLogger() {
+	// ... (initLogger関数は変更なし)
 	logLevel := slog.LevelInfo
-	// clibase のグローバルな Verbose フラグに依存
 	if clibase.Flags.Verbose {
 		logLevel = slog.LevelDebug
 	}
@@ -54,16 +54,82 @@ func initLogger() {
 		Level: logLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
-				// ログサービス (例: Cloud Logging) がタイムスタンプを自動付与するため、
-				// 重複を避ける目的でタイムスタンプを削除します。
 				return slog.Attr{}
 			}
-			// Timeキー以外の属性はそのまま返す
 			return a
 		},
 	})
 	slog.SetDefault(slog.New(handler))
 	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
+}
+
+// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
+type appDependencies struct {
+	Extractor      *extract.Extractor
+	Scraper        scraper.Scraper
+	Cleaner        *cleaner.Cleaner
+	VoicevoxEngine *voicevox.Engine
+}
+
+// newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
+func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
+
+	// 1. Extractorの初期化
+	extractor, err := extract.NewExtractor(httpClient)
+	if err != nil {
+		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
+	}
+
+	// 2. Scraperの初期化
+	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
+
+	// 3. Cleanerの初期化
+	mapModel := config.MapModelName
+	if mapModel == "" {
+		mapModel = cleaner.DefaultMapModelName
+	}
+	reduceModel := config.ReduceModelName
+	if reduceModel == "" {
+		reduceModel = cleaner.DefaultReduceModelName
+	}
+	cleanerInstance, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
+	if err != nil {
+		slog.Error("クリーナーの初期化に失敗しました", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+	}
+
+	// 4. VOICEVOX Engineの初期化
+	var vvEngine *voicevox.Engine
+	if config.VoicevoxAPIURL != "" {
+		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
+
+		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
+
+		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
+		defer cancel()
+
+		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
+		if loadErr != nil {
+			slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
+			return nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
+		}
+
+		parser := voicevox.NewTextParser()
+		engineConfig := voicevox.EngineConfig{
+			MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
+			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
+		}
+
+		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
+	}
+
+	return &appDependencies{
+		Extractor:      extractor,
+		Scraper:        scraperInstance,
+		Cleaner:        cleanerInstance,
+		VoicevoxEngine: vvEngine,
+	}, nil
 }
 
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
@@ -105,66 +171,20 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		ReduceModelName:    Flags.ReduceModelName,
 	}
 
-	// 2. 依存関係の構築 (DIの準備)
-	// 2. 依存関係の構築 (旧 NewPipelineDependencies のロジックを統合)
-
-	// 2-A. Extractorの初期化
-	extractor, err := extract.NewExtractor(httpClient)
+	// 2. 依存関係の構築（ヘルパー関数に委譲）
+	deps, err := newAppDependencies(httpClient, config)
 	if err != nil {
-		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
-	}
-
-	// 2-B. Scraperの初期化
-	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
-
-	// 2-C. Cleanerの初期化
-	mapModel := config.MapModelName
-	if mapModel == "" {
-		mapModel = cleaner.DefaultMapModelName
-	}
-	reduceModel := config.ReduceModelName
-	if reduceModel == "" {
-		reduceModel = cleaner.DefaultReduceModelName
-	}
-	cleanerInstance, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
-	if err != nil {
-		slog.Error("クリーナーの初期化に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
-	}
-
-	// 2-D. VOICEVOX Engineの初期化
-	var vvEngine *voicevox.Engine
-	if config.VoicevoxAPIURL != "" {
-		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
-
-		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
-
-		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
-		defer cancel()
-
-		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
-		if loadErr != nil {
-			slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
-			return fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
-		}
-
-		parser := voicevox.NewTextParser()
-		engineConfig := voicevox.EngineConfig{
-			MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
-			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
-		}
-
-		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
+		// エラーは newAppDependencies 内でログ出力されているため、シンプルにエラーを返す
+		return err
 	}
 
 	// 3. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
 		httpClient,
-		extractor,
-		scraperInstance,
-		cleanerInstance,
-		vvEngine,
+		deps.Extractor,
+		deps.Scraper,
+		deps.Cleaner,
+		deps.VoicevoxEngine,
 		config,
 	)
 
