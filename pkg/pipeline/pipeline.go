@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -156,6 +155,10 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("Final Summaryの生成に失敗しました: %w", err)
 	}
 
+	fmt.Fprintln(os.Stderr, "\n--- AI Final Summary生成結果 ---")
+	fmt.Fprintln(os.Stderr, finalSummary)
+	fmt.Fprintln(os.Stderr, "------------------------------------")
+
 	// --- 4-B. Script Generation の実行 ---
 	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, title, finalSummary)
 	if err != nil {
@@ -163,19 +166,14 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("VOICEVOXスクリプトの生成に失敗しました: %w", err)
 	}
 
+	fmt.Fprintln(os.Stderr, "\n--- AI スクリプト生成結果 ---")
+	fmt.Fprintln(os.Stderr, scriptText)
+	fmt.Fprintln(os.Stderr, "------------------------------------")
+
 	// --- 5. AI処理結果の出力分岐 ---
 	if p.VoicevoxEngine != nil && p.OutputWAVPath != "" {
 		// --- 5-A. VOICEVOXによる音声合成とWAV出力 ---
 		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.OutputWAVPath))
-
-		// ディレクトリの存在確認と作成
-		outputDir := filepath.Dir(p.OutputWAVPath)
-		if outputDir != "." { // カレントディレクトリでない場合のみ
-			if err := os.MkdirAll(outputDir, 0755); err != nil {
-				return fmt.Errorf("出力ディレクトリの作成に失敗しました (%s): %w", outputDir, err)
-			}
-		}
-
 		err := p.VoicevoxEngine.Execute(ctx, scriptText, p.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
