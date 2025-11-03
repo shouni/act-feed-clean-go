@@ -4,11 +4,11 @@ go 1.25
 
 require (
 	github.com/mmcdole/gofeed v1.3.0
-	github.com/shouni/action-perfect-get-on-go v1.0.5
 	github.com/shouni/go-ai-client/v2 v2.0.2
 	github.com/shouni/go-cli-base v1.0.4
 	github.com/shouni/go-http-kit v1.0.3
 	github.com/shouni/go-utils v1.0.6
+	github.com/shouni/go-voicevox v1.0.7
 	github.com/shouni/go-web-exact/v2 v2.0.5
 	github.com/spf13/cobra v1.10.1
 )
@@ -20,6 +20,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.10.3 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/forPelevin/gomoji v1.4.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -31,6 +32,7 @@ require (
 	github.com/mmcdole/goxpp v1.1.1-0.20240225020742-a0c311522b23 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	go.opencensus.io v0.24.0 // indirect
