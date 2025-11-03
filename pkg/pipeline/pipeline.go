@@ -20,7 +20,7 @@ import (
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
-// PipelineConfig はパイプライン実行のためのすべての設定値を保持します。（変更なし）
+// PipelineConfig はパイプライン実行のためのすべての設定値を保持します。
 type PipelineConfig struct {
 	Parallel           int
 	Verbose            bool
@@ -33,7 +33,7 @@ type PipelineConfig struct {
 	ReduceModelName    string
 }
 
-// Pipeline は記事の取得から結合までの一連の流れを管理します。（変更なし）
+// Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
 	Client    *httpkit.Client
 	Extractor *extract.Extractor
@@ -50,24 +50,21 @@ type Pipeline struct {
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-// 変更点: 依存関係 (Extractor, Scraper, Cleaner, VoicevoxEngine) を引数で受け取る
 func New(
 	client *httpkit.Client,
 	extractor *extract.Extractor,
-	s scraper.Scraper, // 's' は scraper.Scraper の意
-	c *cleaner.Cleaner, // 'c' は *cleaner.Cleaner の意
+	scraperInstance scraper.Scraper,
+	cleanerInstance *cleaner.Cleaner,
 	vvEngine *voicevox.Engine,
 	config PipelineConfig,
 ) *Pipeline {
-	// ログ設定: New関数からログ初期化ロジックを移動または簡略化
-	// ログ初期化は通常、アプリケーションのエントリポイント（cmd/root.go）で行うべきですが、
-	// ここでは New に依存関係がないため、冗長なコードを削除します。
+	// New 関数からログ初期化ロジックは削除されました
 
 	return &Pipeline{
 		Client:    client,
 		Extractor: extractor,
-		Scraper:   s,
-		Cleaner:   c,
+		Scraper:   scraperInstance,
+		Cleaner:   cleanerInstance,
 
 		VoicevoxEngine: vvEngine,
 		OutputWAVPath:  config.OutputWAVPath,
@@ -77,27 +74,10 @@ func New(
 	}
 }
 
-// NewPipelineDependencies は、NewPipelineWithDependencies の前に呼び出され、
-// Pipeline に必要なすべての依存関係を構築します。
+// NewPipelineDependencies は、Pipeline に必要なすべての依存関係を構築します。
 // この関数は、旧 New 関数の内部ロジックを保持します。
 func NewPipelineDependencies(client *httpkit.Client, config PipelineConfig) (*extract.Extractor, scraper.Scraper, *cleaner.Cleaner, *voicevox.Engine, error) {
-	// ログ設定は呼び出し元 (cmd/root.go) に移譲することを推奨しますが、
-	// 互換性のため、設定は保持し、初期化のみを行います。
-
-	logLevel := slog.LevelInfo
-	if config.Verbose {
-		logLevel = slog.LevelDebug
-	}
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: logLevel,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if a.Key == slog.TimeKey {
-				return slog.Attr{}
-			}
-			return a
-		},
-	})
-	slog.SetDefault(slog.New(handler))
+	// 修正: slog の初期化ロジックを削除しました。初期化は cmd/root.go に移動します。
 
 	// 1. Extractorの初期化
 	extractor, err := extract.NewExtractor(client)
@@ -130,14 +110,15 @@ func NewPipelineDependencies(client *httpkit.Client, config PipelineConfig) (*ex
 		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
 		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
-		defer cancel()
+		defer cancel() // 修正: deferで確実にキャンセルを実行
 
+		// voicevox.LoadSpeakers は voicevox.Engine が依存する speakerData を取得
 		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
 		if loadErr != nil {
-			cancel() // タイムアウトを確実に停止
+			// 修正: 冗長な cancel() の呼び出しを削除
 			return nil, nil, nil, nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
 		}
-		cancel() // タイムアウトを確実に停止
+		// 修正: 冗長な cancel() の呼び出しを削除
 
 		parser := voicevox.NewTextParser()
 		engineConfig := voicevox.EngineConfig{
@@ -151,7 +132,7 @@ func NewPipelineDependencies(client *httpkit.Client, config PipelineConfig) (*ex
 	return extractor, parallelScraper, llmCleaner, vvEngine, nil
 }
 
-// Run, processWithoutAI 関数は DI の変更による影響を受けないため、そのまま保持します。
+// Run はフィードの取得、記事の並列抽出、AI処理、およびI/O処理を実行します。
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// --- 1. RSSフィードの取得とURLリスト生成 ---
@@ -282,6 +263,6 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	// iohandler.WriteOutputの第二引数は []byte を受け取ります。
+	// iohandler.WriteOutputの第二引数は string を受け取る (Saved Informationに基づく)
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
