@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"act-feed-clean-go/pkg/scraper"
 	"context"
 	"fmt"
 	"log/slog"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	clibase "github.com/shouni/go-cli-base"
+	"github.com/shouni/go-voicevox/pkg/voicevox"
+	"github.com/shouni/go-web-exact/v2/pkg/extract"
 	"github.com/spf13/cobra"
 
 	"act-feed-clean-go/pkg/cleaner"
@@ -103,18 +106,64 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. 依存関係の構築 (DIの準備)
-	extractor, scraper, cleaner, vvEngine, err := pipeline.NewPipelineDependencies(httpClient, config)
+	// 2. 依存関係の構築 (旧 NewPipelineDependencies のロジックを統合)
+
+	// 2-A. Extractorの初期化
+	extractor, err := extract.NewExtractor(httpClient)
 	if err != nil {
-		slog.Error("パイプライン依存関係の構築に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("パイプライン依存関係の構築に失敗しました: %w", err)
+		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
+		return fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
+	}
+
+	// 2-B. Scraperの初期化
+	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
+
+	// 2-C. Cleanerの初期化
+	mapModel := config.MapModelName
+	if mapModel == "" {
+		mapModel = cleaner.DefaultMapModelName
+	}
+	reduceModel := config.ReduceModelName
+	if reduceModel == "" {
+		reduceModel = cleaner.DefaultReduceModelName
+	}
+	cleanerInstance, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
+	if err != nil {
+		slog.Error("クリーナーの初期化に失敗しました", slog.String("error", err.Error()))
+		return fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+	}
+
+	// 2-D. VOICEVOX Engineの初期化
+	var vvEngine *voicevox.Engine
+	if config.VoicevoxAPIURL != "" {
+		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
+
+		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
+
+		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
+		defer cancel()
+
+		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
+		if loadErr != nil {
+			slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
+			return fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
+		}
+
+		parser := voicevox.NewTextParser()
+		engineConfig := voicevox.EngineConfig{
+			MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
+			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
+		}
+
+		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
 	}
 
 	// 3. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
 		httpClient,
 		extractor,
-		scraper,
-		cleaner,
+		scraperInstance,
+		cleanerInstance,
 		vvEngine,
 		config,
 	)

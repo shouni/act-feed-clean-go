@@ -35,18 +35,13 @@ type PipelineConfig struct {
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
-	Client    *httpkit.Client
-	Extractor *extract.Extractor
-
-	Scraper scraper.Scraper
-	Cleaner *cleaner.Cleaner
-
-	// VOICEVOX統合のためのフィールド
-	VoicevoxEngine *voicevox.Engine
 	OutputWAVPath  string // 音声合成後の出力ファイルパス
-
-	// 設定値への参照を保持
-	config PipelineConfig // 設定値への参照を保持
+	config         PipelineConfig
+	Client         *httpkit.Client
+	Extractor      *extract.Extractor
+	Scraper        scraper.Scraper
+	Cleaner        *cleaner.Cleaner
+	VoicevoxEngine *voicevox.Engine
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
@@ -72,64 +67,6 @@ func New(
 		// 設定値全体を保持
 		config: config,
 	}
-}
-
-// NewPipelineDependencies は、Pipeline に必要なすべての依存関係を構築します。
-// この関数は、旧 New 関数の内部ロジックを保持します。
-func NewPipelineDependencies(client *httpkit.Client, config PipelineConfig) (*extract.Extractor, scraper.Scraper, *cleaner.Cleaner, *voicevox.Engine, error) {
-	// 修正: slog の初期化ロジックを削除しました。初期化は cmd/root.go に移動します。
-
-	// 1. Extractorの初期化
-	extractor, err := extract.NewExtractor(client)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
-	}
-
-	// 2. Scraperの初期化
-	parallelScraper := scraper.NewParallelScraper(extractor, config.Parallel)
-
-	// 3. Cleanerの初期化
-	mapModel := config.MapModelName
-	if mapModel == "" {
-		mapModel = cleaner.DefaultMapModelName
-	}
-	reduceModel := config.ReduceModelName
-	if reduceModel == "" {
-		reduceModel = cleaner.DefaultReduceModelName
-	}
-	llmCleaner, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
-	}
-
-	// 4. VOICEVOX Engineの初期化
-	var vvEngine *voicevox.Engine
-	if config.VoicevoxAPIURL != "" {
-		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
-
-		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
-
-		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
-		defer cancel()
-
-		// voicevox.LoadSpeakers は voicevox.Engine が依存する speakerData を取得
-		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
-		if loadErr != nil {
-			// 修正: 冗長な cancel() の呼び出しを削除
-			return nil, nil, nil, nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
-		}
-		// 修正: 冗長な cancel() の呼び出しを削除
-
-		parser := voicevox.NewTextParser()
-		engineConfig := voicevox.EngineConfig{
-			MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
-			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
-		}
-
-		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
-	}
-
-	return extractor, parallelScraper, llmCleaner, vvEngine, nil
 }
 
 // Run はフィードの取得、記事の並列抽出、AI処理、およびI/O処理を実行します。
