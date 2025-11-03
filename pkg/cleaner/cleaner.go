@@ -3,7 +3,7 @@ package cleaner
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"unicode"
@@ -24,7 +24,7 @@ const DefaultSeparator = "\n\n"
 const MaxSegmentChars = 400000
 
 // ----------------------------------------------------------------
-// Cleaner 構造体とコンストラクタ
+// Cleaner 構造体とコンストラクタ (変更なし)
 // ----------------------------------------------------------------
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
@@ -48,7 +48,6 @@ func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 		reduceModel = DefaultModelName
 	}
 
-	// プロンプトテンプレートの初期化と検証
 	mapBuilder := prompts.NewMapPromptBuilder()
 	if err := mapBuilder.Err(); err != nil {
 		return nil, fmt.Errorf("Map プロンプトビルダーの初期化に失敗しました: %w", err)
@@ -68,11 +67,12 @@ func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 }
 
 // ----------------------------------------------------------------
-// メインロジック
+// メインロジック (変更なし)
 // ----------------------------------------------------------------
 
 // CombineContents は、成功した抽出結果の本文を効率的に結合します。
 func CombineContents(results []types.URLResult) string {
+	// ... (関数本体は変更なし)
 	var builder strings.Builder
 
 	// 成功した結果のみをフィルタリング
@@ -116,7 +116,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 
 	// 2. Mapフェーズのためのテキスト分割
 	segments := c.segmentText(combinedText, MaxSegmentChars)
-	log.Printf("テキストを %d 個のセグメントに分割しました。中間要約を開始します。", len(segments))
+	slog.Info("テキストをセグメントに分割しました", slog.Int("segments", len(segments)))
 
 	// 3. Mapフェーズの実行（各セグメントの並列処理）
 	intermediateSummaries, err := c.processSegmentsInParallel(ctx, client, segments)
@@ -128,7 +128,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	finalCombinedText := strings.Join(intermediateSummaries, "\n\n--- INTERMEDIATE SUMMARY END ---\n\n")
 
 	// 5. Reduceフェーズ：最終的な統合と構造化のためのLLM呼び出し (省略)
-	log.Println("中間要約の結合が完了しました。最終的な構造化（Reduceフェーズ）を開始します。")
+	slog.Info("中間要約の結合が完了しました。最終的な構造化（Reduceフェーズ）を開始します。")
 
 	reduceData := prompts.ReduceTemplateData{CombinedText: finalCombinedText}
 	finalPrompt, err := c.reduceBuilder.BuildReduce(reduceData)
@@ -145,11 +145,12 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 }
 
 // ----------------------------------------------------------------
-// ヘルパー関数群
+// ヘルパー関数群 (segmentTextは変更なし)
 // ----------------------------------------------------------------
 
 // segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
 func (c *Cleaner) segmentText(text string, maxChars int) []string {
+	// ... (関数本体は変更なし)
 	var segments []string
 	current := []rune(text)
 
@@ -187,37 +188,29 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 
 		// 3. 意味的な区切り文字（句読点、スペース）を探し、より自然な場所で分割
 		if !separatorFound {
-			// maxCharsの直前から開始し、最初のスペースや句読点の直後を探す
-			// 検索範囲をmaxCharsの直前50文字程度に制限して効率化を図る
 			const lookback = 50
 			start := max(0, len(segmentCandidateRunes)-lookback)
 
-			// 最後に意味的な区切りが見つかった位置
 			lastMeaningfulBreak := -1
 
-			// ルーン単位で逆方向にスキャン
 			for i := len(segmentCandidateRunes) - 1; i >= start; i-- {
 				r := segmentCandidateRunes[i]
 
-				// 句読点、スペース、全角スペースなど、文脈が途切れる可能性がある文字を探す
 				if unicode.IsPunct(r) || unicode.IsSpace(r) {
-					// 区切り文字の直後を分割点とする
 					lastMeaningfulBreak = i + 1
 					break
 				}
 			}
 
 			if lastMeaningfulBreak != -1 {
-				// 意味的な区切りが見つかった場合、その位置を採用
 				splitIndex = lastMeaningfulBreak
 				separatorFound = true
 			}
 		}
 
 		if !separatorFound {
-			// 最終手段: 安全な区切りが見つからない場合は、そのまま最大文字数で切り、警告を出す
 			if c.Verbose {
-				log.Printf("⚠️ WARNING: 分割点で適切な区切りが見つかりませんでした。強制的に %d 文字で分割します。", maxChars)
+				slog.Warn("分割点で適切な区切りが見つかりませんでした。強制的に分割します。", slog.Int("max_chars", maxChars))
 			}
 			splitIndex = maxChars
 		}
@@ -240,7 +233,10 @@ func max(a, b int) int {
 // processSegmentsInParallel は Mapフェーズを並列処理します。
 func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.Client, segments []string) ([]string, error) {
 	var wg sync.WaitGroup
+
+	// segmentIndex, summary, error を格納するチャネル
 	resultsChan := make(chan struct {
+		index   int
 		summary string
 		err     error
 	}, len(segments))
@@ -255,9 +251,10 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 			prompt, err := c.mapBuilder.BuildMap(mapData)
 			if err != nil {
 				resultsChan <- struct {
+					index   int
 					summary string
 					err     error
-				}{summary: "", err: fmt.Errorf("セグメント %d プロンプト生成失敗: %w", index+1, err)}
+				}{index: index + 1, summary: "", err: fmt.Errorf("プロンプト生成失敗: %w", err)}
 				return
 			}
 
@@ -265,47 +262,43 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 
 			if err != nil {
 				resultsChan <- struct {
+					index   int
 					summary string
 					err     error
-				}{summary: "", err: fmt.Errorf("セグメント %d 処理失敗: %w", index+1, err)}
+				}{index: index + 1, summary: "", err: fmt.Errorf("LLM処理失敗: %w", err)}
 				return
 			}
 
 			resultsChan <- struct {
+				index   int
 				summary string
 				err     error
-			}{summary: response.Text, err: nil}
+			}{index: index + 1, summary: response.Text, err: nil}
 		}(i, segment)
 	}
 
 	wg.Wait()
 	close(resultsChan)
 
+	// 修正: エラー蓄積ロジックを導入
 	var summaries []string
-	// エラー報告のために、すべての結果を集める必要があるため、一旦スライスにコピー
-	allResults := make([]struct {
-		summary string
-		err     error
-	}, 0, len(segments))
-	for res := range resultsChan {
-		allResults = append(allResults, res)
-	}
+	var errorMessages []string
 
-	// エラーチェックと集約
-	var firstError error
-	for _, res := range allResults {
+	for res := range resultsChan {
 		if res.err != nil {
-			if firstError == nil {
-				firstError = res.err
-			}
+			// エラーが発生した場合、エラーメッセージを蓄積
+			errorMessages = append(errorMessages, fmt.Sprintf("セグメント %d: %v", res.index, res.err))
 		} else {
+			// 成功した場合、要約を蓄積
 			summaries = append(summaries, res.summary)
 		}
 	}
 
-	if firstError != nil {
-		// 少なくとも1つのエラーがあれば、処理全体を失敗させる
-		return nil, firstError
+	// 蓄積されたエラーをチェックし、あれば単一のエラーとして結合して返す
+	if len(errorMessages) > 0 {
+		return nil, fmt.Errorf("Mapフェーズで %d 件のエラーが発生しました:\n- %s",
+			len(errorMessages),
+			strings.Join(errorMessages, "\n- "))
 	}
 
 	return summaries, nil

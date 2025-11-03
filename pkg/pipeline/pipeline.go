@@ -106,7 +106,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
 	}
 
-	// ログ出力の修正: slog.Infoを使用し、構造化データとして情報を付加
 	slog.Info("記事URLの抽出を開始します",
 		slog.Int("urls", len(urlsToScrape)),
 		slog.Int("parallel", p.Parallel),
@@ -122,19 +121,14 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		if res.Error == nil {
 			successCount++
 		} else {
-			// Verboseフラグに関わらず、エラーはWarnレベルで出力
-			// Verboseはログレベルで制御されるため、この条件分岐は不要
-			// ただし、今回はユーザーの意図を反映し、Verboseモードでのみエラー詳細を表示
-			if p.Verbose {
-				slog.Warn("抽出エラー",
-					slog.String("url", res.URL),
-					slog.String("error", res.Error.Error()),
-				)
-			}
+			// 修正: WarnレベルのログをVerbose条件から外し、常に重要な情報として出力
+			slog.Warn("抽出エラー",
+				slog.String("url", res.URL),
+				slog.String("error", res.Error.Error()),
+			)
 		}
 	}
 
-	// ログ出力の修正: slog.Info
 	slog.Info("抽出完了",
 		slog.Int("success", successCount),
 		slog.Int("total", len(urlsToScrape)),
@@ -150,7 +144,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// --- 4. AI処理の実行 (Cleanerによる Map-Reduce) ---
-	// ログ出力の修正: slog.Info
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
 	// 4-1. コンテンツの結合
@@ -175,8 +168,8 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 
 	for _, res := range results {
 		if res.Error != nil {
-			// AI処理スキップモードでも失敗したURLを通知
-			slog.Warn("抽出失敗",
+			// エラーはRunでWarnレベルで出力済み。ここではWarningは不要だが、念のためWarnレベルを維持
+			slog.Warn("抽出失敗 (処理スキップ)",
 				slog.String("url", res.URL),
 				slog.String("mode", "AI処理スキップ"),
 			)
@@ -196,6 +189,11 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 
 	combinedText := combinedTextBuilder.String()
 
+	// 修正: combinedTextが空の場合のチェックと警告ログの追加
+	if combinedText == "" {
+		// RunメソッドでsuccessCount > 0 のチェック済みのため、これはContentが空だった場合に発生
+		slog.Warn("すべての記事本文が空でした。空の出力を生成します。", slog.String("mode", "AI処理スキップ"))
+	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
 	return iohandler.WriteOutput("", []byte(combinedText))
