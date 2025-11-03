@@ -9,17 +9,17 @@ import (
 
 // --- テンプレート埋め込み ---
 
-//go:embed map_segment_prompt.md
+//go:embed map_prompt.md
 var MapSegmentPromptTemplate string
 
-//go:embed reduce_final_prompt.md
+//go:embed reduce_prompt.md
 var ReduceFinalPromptTemplate string
+
+//go:embed summary_prompt.md
+var FinalSummaryPromptTemplate string
 
 //go:embed zundametan_duet.md
 var zundametanDuetPromptTemplate string // 修正: Script Templateとして利用
-
-//go:embed final_summary_prompt.md
-var FinalSummaryPromptTemplate string
 
 // ---
 
