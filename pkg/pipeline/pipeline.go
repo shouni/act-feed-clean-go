@@ -45,7 +45,11 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (
 	parallelScraper := scraper.NewParallelScraper(extractor, parallel)
 
 	// 3. Cleanerの初期化 (AI処理ロジックをカプセル化)
-	llmCleaner, err := cleaner.NewCleaner()
+	// 修正: NewCleanerにデフォルトモデル名とverboseフラグを渡す
+	// NOTE: モデル名をCLIから設定するフラグがないため、デフォルト名を使用
+	const defaultMapModel = cleaner.DefaultModelName
+	const defaultReduceModel = cleaner.DefaultModelName
+	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, verbose)
 	if err != nil {
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}

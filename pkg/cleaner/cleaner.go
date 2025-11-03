@@ -7,9 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	// 修正: 現在のプロジェクト内の pkg/types をインポート
 	"act-feed-clean-go/pkg/types"
-	// prompts パッケージは外部依存としてそのまま利用することを想定
+
 	"github.com/shouni/action-perfect-get-on-go/prompts"
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 )
@@ -28,14 +27,29 @@ const MaxSegmentChars = 400000
 // ----------------------------------------------------------------
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
-// Map/Reduce用のプロンプトビルダーを保持します。
 type Cleaner struct {
 	mapBuilder    *prompts.PromptBuilder
 	reduceBuilder *prompts.PromptBuilder
+	// 修正: LLMモデル名を保持するフィールドを追加
+	MapModelName    string
+	ReduceModelName string
+	// 修正: 警告ログ制御のためのVerboseフラグを追加
+	Verbose bool
 }
 
+// DefaultModelName は Map/Reduce のデフォルトモデル名です。
+const DefaultModelName = "gemini-2.5-flash"
+
 // NewCleaner は新しいCleanerインスタンスを作成し、PromptBuilderを初期化します。
-func NewCleaner() (*Cleaner, error) {
+// Map/Reduceで使用するLLMモデル名とVerboseフラグを受け取るように変更。
+func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
+	if mapModel == "" {
+		mapModel = DefaultModelName
+	}
+	if reduceModel == "" {
+		reduceModel = DefaultModelName
+	}
+
 	// プロンプトテンプレートの初期化と検証
 	mapBuilder := prompts.NewMapPromptBuilder()
 	if err := mapBuilder.Err(); err != nil {
@@ -49,6 +63,11 @@ func NewCleaner() (*Cleaner, error) {
 	return &Cleaner{
 		mapBuilder:    mapBuilder,
 		reduceBuilder: reduceBuilder,
+		// 修正: モデル名をセット
+		MapModelName:    mapModel,
+		ReduceModelName: reduceModel,
+		// 修正: Verboseフラグをセット
+		Verbose: verbose,
 	}, nil
 }
 
@@ -57,7 +76,6 @@ func NewCleaner() (*Cleaner, error) {
 // ----------------------------------------------------------------
 
 // CombineContents は、成功した抽出結果の本文を効率的に結合します。
-// 各コンテンツの前には、ソースURL情報が付加されます。
 func CombineContents(results []types.URLResult) string {
 	var builder strings.Builder
 
@@ -97,11 +115,11 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("LLMクライアントの初期化に失敗しました。APIキー（--llm-api-keyオプションまたは環境変数）が設定されているか確認してください: %w", err)
+		return "", fmt.Errorf("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください: %w", err)
 	}
 
 	// 2. Mapフェーズのためのテキスト分割
-	segments := segmentText(combinedText, MaxSegmentChars)
+	segments := c.segmentText(combinedText, MaxSegmentChars) // c.segmentTextに変更
 	log.Printf("テキストを %d 個のセグメントに分割しました。中間要約を開始します。", len(segments))
 
 	// 3. Mapフェーズの実行（各セグメントの並列処理）
@@ -122,7 +140,8 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 		return "", fmt.Errorf("最終 Reduce プロンプトの生成に失敗しました: %w", err)
 	}
 
-	finalResponse, err := client.GenerateContent(ctx, finalPrompt, "gemini-2.5-flash")
+	// 修正: ReduceLLMModelを使用
+	finalResponse, err := client.GenerateContent(ctx, finalPrompt, c.ReduceModelName)
 	if err != nil {
 		return "", fmt.Errorf("LLM最終構造化処理（Reduceフェーズ）に失敗しました: %w", err)
 	}
@@ -135,8 +154,8 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 // ----------------------------------------------------------------
 
 // segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
-// 段落の区切りを優先して分割し、文脈の欠落を最小限に抑えます。
-func segmentText(text string, maxChars int) []string {
+// Cleanerのメソッドに修正。
+func (c *Cleaner) segmentText(text string, maxChars int) []string {
 	var segments []string
 	current := []rune(text)
 
@@ -146,30 +165,42 @@ func segmentText(text string, maxChars int) []string {
 			break
 		}
 
-		splitIndex := maxChars
-		segmentCandidate := string(current[:maxChars])
+		// 修正: runesで操作するため、maxChars分のruneスライスを取得
+		segmentCandidateRunes := current[:maxChars]
+		segmentCandidate := string(segmentCandidateRunes)
+
+		splitIndex := maxChars // デフォルトはmaxCharsで強制分割
 		separatorFound := false
-		separatorLen := 0
 
 		// 1. ContentSeparator (最高優先度) を探す
-		if lastSepIdx := strings.LastIndex(segmentCandidate, ContentSeparator); lastSepIdx != -1 && lastSepIdx > maxChars/2 {
-			splitIndex = lastSepIdx
-			separatorLen = len(ContentSeparator)
-			separatorFound = true
-		} else if lastSepIdx := strings.LastIndex(segmentCandidate, DefaultSeparator); lastSepIdx != -1 && lastSepIdx > maxChars/2 {
-			// 2. ContentSeparator が見つからない場合、一般的な改行(\n\n)を探す
-			splitIndex = lastSepIdx
-			separatorLen = len(DefaultSeparator)
-			separatorFound = true
+		if lastSepIdx := strings.LastIndex(segmentCandidate, ContentSeparator); lastSepIdx != -1 {
+			// 区切り文字の直後までを分割位置とする
+			potentialSplitIndex := lastSepIdx + len(ContentSeparator)
+			// 修正: maxCharsを超えない場合のみ採用
+			if potentialSplitIndex <= maxChars {
+				splitIndex = potentialSplitIndex
+				separatorFound = true
+			}
 		}
 
-		// 区切り文字の種類に応じて、加算する長さを適切に選択
-		if separatorFound {
-			// 区切り文字の直後までを分割位置とする
-			splitIndex += separatorLen
-		} else {
-			// 安全な区切りが見つからない場合は、そのまま最大文字数で切り、警告を出す
-			log.Printf("⚠️ WARNING: 分割点で適切な区切りが見つかりませんでした。強制的に %d 文字で分割します。", maxChars)
+		// 2. ContentSeparator が見つからない、または採用されなかった場合、一般的な改行(\n\n)を探す
+		if !separatorFound {
+			if lastSepIdx := strings.LastIndex(segmentCandidate, DefaultSeparator); lastSepIdx != -1 {
+				// 同様にmaxCharsを超えないように調整
+				potentialSplitIndex := lastSepIdx + len(DefaultSeparator)
+				// 修正: maxCharsを超えない場合のみ採用
+				if potentialSplitIndex <= maxChars {
+					splitIndex = potentialSplitIndex
+					separatorFound = true
+				}
+			}
+		}
+
+		if !separatorFound {
+			// 修正: Verboseフラグに基づき警告を表示
+			if c.Verbose {
+				log.Printf("⚠️ WARNING: 分割点で適切な区切りが見つかりませんでした。強制的に %d 文字で分割します。", maxChars)
+			}
 			splitIndex = maxChars
 		}
 
@@ -205,7 +236,8 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 				return
 			}
 
-			response, err := client.GenerateContent(ctx, prompt, "gemini-2.5-flash")
+			// 修正: MapModelNameを使用
+			response, err := client.GenerateContent(ctx, prompt, c.MapModelName)
 
 			if err != nil {
 				log.Printf("❌ ERROR: セグメント %d の処理に失敗しました: %v", index+1, err)
