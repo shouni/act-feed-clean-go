@@ -87,10 +87,10 @@ func NewPromptManager() (*PromptManager, error) {
 	}
 
 	return &PromptManager{
-		MapBuilder:          prompts.NewMapPromptBuilder(),
-		ReduceBuilder:       prompts.NewReducePromptBuilder(),
-		FinalSummaryBuilder: prompts.NewFinalSummaryPromptBuilder(),
-		ScriptBuilder:       prompts.NewScriptPromptBuilder(),
+		MapBuilder:          mapBuilder,
+		ReduceBuilder:       reduceBuilder,
+		FinalSummaryBuilder: finalSummaryBuilder,
+		ScriptBuilder:       scriptBuilder,
 	}, nil
 }
 
