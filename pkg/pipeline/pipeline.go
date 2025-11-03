@@ -263,6 +263,5 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	// iohandler.WriteOutputの第二引数は string を受け取る (Saved Informationに基づく)
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
