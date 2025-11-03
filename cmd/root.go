@@ -158,6 +158,9 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
 func runCmdFunc(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel()
+
 	// ログの初期化をここで行う (DIコンポーネントの構築前に実行する必要がある)
 	initLogger()
 
@@ -191,9 +194,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// 2. 依存関係の構築（ヘルパー関数に委譲）
-	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
-	defer cancel()
-
 	deps, err := newAppDependencies(ctx, httpClient, config)
 	if err != nil {
 		// エラーは newAppDependencies 内でログ出力されているため、シンプルにエラーを返す
@@ -211,9 +211,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	)
 
 	// 4. Pipelineの実行
-	ctx, cancel = context.WithTimeout(ctx, contextTimeout)
-	defer cancel()
-
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
 }
 
