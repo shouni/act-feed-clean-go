@@ -43,7 +43,7 @@ type Pipeline struct {
 	VoicevoxEngine *voicevox.Engine
 	OutputWAVPath  string // 音声合成後の出力ファイルパス
 
-	// 💡 修正1: 冗長な設定値フィールドを削除し、PipelineConfigへの参照を保持
+	//  冗長な設定値フィールドを削除し、PipelineConfigへの参照を保持
 	config PipelineConfig // 設定値への参照を保持
 }
 
@@ -152,7 +152,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	slog.Info("記事URLの抽出を開始します",
 		slog.Int("urls", len(urlsToScrape)),
-		slog.Int("parallel", p.config.Parallel), // 💡 configからParallelにアクセス
+		slog.Int("parallel", p.config.Parallel),
 		slog.String("feed_url", feedURL),
 	)
 
@@ -181,7 +181,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// 💡 修正3: LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力 (p.config.LLMAPIKeyにアクセス)
+	//  LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力 (p.config.LLMAPIKeyにアクセス)
 	if p.config.LLMAPIKey == "" {
 		slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
 		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
@@ -191,8 +191,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
 	combinedTextForAI := cleaner.CombineContents(results)
-
-	// 💡 修正4: クリーンアップと構造化の実行 (p.config.LLMAPIKeyにアクセス)
 	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.config.LLMAPIKey)
 	if err != nil {
 		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
