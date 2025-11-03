@@ -54,7 +54,6 @@ type Cleaner struct {
 	finalSummaryBuilder *prompts.PromptBuilder
 	scriptBuilder       *prompts.PromptBuilder
 	config              CleanerConfig
-	Verbose             bool
 }
 
 type CleanerConfig struct {
@@ -67,12 +66,12 @@ type CleanerConfig struct {
 
 // NewCleaner は新しいCleanerインスタンスを作成し、依存関係とPromptBuilderを初期化します。
 // 修正: クライアントインスタンスと全モデル名を受け取ります。
-func NewCleaner(client *gemini.Client, config CleanerConfig, verbose bool) (*Cleaner, error) {
+func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 	if client == nil {
 		return nil, fmt.Errorf("LLMクライアントはnilであってはなりません")
 	}
 
-	// デフォルト値の設定を復活させるか、CleanerConfigのコンストラクタで処理する
+	// デフォルト値の設定
 	if config.MapModel == "" {
 		config.MapModel = DefaultMapModelName
 	}
@@ -114,7 +113,6 @@ func NewCleaner(client *gemini.Client, config CleanerConfig, verbose bool) (*Cle
 		finalSummaryBuilder: finalSummaryBuilder, // 新規追加
 		scriptBuilder:       scriptBuilder,       // 新規追加
 		config:              config,
-		Verbose:             verbose,
 	}, nil
 }
 
@@ -347,7 +345,7 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 		}
 
 		if !separatorFound {
-			if c.Verbose {
+			if c.config.Verbose {
 				slog.Warn("分割点で適切な区切りが見つかりませんでした。強制的に分割します。", slog.Int("max_chars", maxChars))
 			}
 			splitIndex = maxChars

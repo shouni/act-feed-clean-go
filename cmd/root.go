@@ -125,7 +125,6 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
 		cleanerConfig,
-		config.Verbose,
 	)
 
 	// 4. VOICEVOX Engineの初期化
