@@ -40,9 +40,10 @@ type RunFlags struct {
 var Flags RunFlags
 
 const (
-	maxRetries          = 3
-	contextTimeout      = 10 * time.Minute
-	maxParallelSegments = 4
+	maxRetries            = 3
+	contextTimeout        = 20 * time.Minute
+	maxParallelSegments   = 2
+	defaultSegmentTimeout = 600 * time.Second
 )
 
 // ----------------------------------------------------------------------
@@ -145,7 +146,7 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 		parser := voicevox.NewTextParser()
 		engineConfig := voicevox.EngineConfig{
 			MaxParallelSegments: maxParallelSegments,
-			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
+			SegmentTimeout:      defaultSegmentTimeout,
 		}
 
 		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
