@@ -3,137 +3,180 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
-	"sync"
 
-	"golang.org/x/sync/semaphore"
-
+	"act-feed-clean-go/pkg/cleaner"
 	"act-feed-clean-go/pkg/feed"
+	"act-feed-clean-go/pkg/scraper"
+	"act-feed-clean-go/pkg/types"
+
 	"github.com/shouni/go-http-kit/pkg/httpkit"
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
-// ExtractedArticle は並列処理の結果を保持するための構造体。
-type ExtractedArticle struct {
-	URL     string
-	Title   string
-	Content string
-	Error   error
-}
-
-// ArticleInfo は並列処理に渡すための記事URLとタイトル情報。
-type ArticleInfo struct {
-	URL   string
-	Title string
-}
-
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
-	// 依存性の注入 (DI)
 	Client    *httpkit.Client
 	Extractor *extract.Extractor
 
+	Scraper scraper.Scraper
+	Cleaner *cleaner.Cleaner
+
 	// 設定値
-	Parallel int
-	Verbose  bool // 修正: Verboseフラグを追加
+	Parallel  int
+	Verbose   bool
+	LLMAPIKey string // LLM処理のためにAPIキーを保持
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-// cmd/root.go から呼び出され、httpClient、並列数、verboseフラグを渡されます。
-func New(client *httpkit.Client, parallel int, verbose bool) (*Pipeline, error) { // 修正: verbose引数を追加
-	// ExtractorはClientに依存するため、ここで初期化してDIする
+func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (*Pipeline, error) {
+
+	// ログ設定: slog.Handlerの選択と設定
+	// Verboseが設定されている場合、ログレベルをDebug以上にする
+	logLevel := slog.LevelInfo
+	if verbose {
+		logLevel = slog.LevelDebug
+	}
+
+	// TextHandler (ログをkey=value形式で出力) を使用
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+		// Timeの表示を抑制
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	slog.SetDefault(slog.New(handler))
+
+	// 1. Extractorの初期化 (Scraperが依存)
 	extractor, err := extract.NewExtractor(client)
 	if err != nil {
 		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
 	}
 
+	// 2. Scraperの初期化 (並列処理ロジックをカプセル化)
+	parallelScraper := scraper.NewParallelScraper(extractor, parallel)
+
+	// 3. Cleanerの初期化 (AI処理ロジックをカプセル化)
+	const defaultMapModel = cleaner.DefaultModelName
+	const defaultReduceModel = cleaner.DefaultModelName
+	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+	}
+
 	return &Pipeline{
 		Client:    client,
 		Extractor: extractor,
+		Scraper:   parallelScraper,
+		Cleaner:   llmCleaner,
 		Parallel:  parallel,
 		Verbose:   verbose,
+		LLMAPIKey: llmAPIKey,
 	}, nil
 }
 
-// Run はフィードの取得、記事の並列抽出、結果の結合、およびI/O処理を実行します。
+// Run はフィードの取得、記事の並列抽出、AI処理、およびI/O処理を実行します。
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
-	// 1. RSSフィードの取得とURLリスト生成
+	// --- 1. RSSフィードの取得とURLリスト生成 ---
 	rssFeed, err := feed.FetchAndParse(ctx, p.Client, feedURL)
 	if err != nil {
+		slog.Error("RSSフィードの取得・パースに失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("RSSフィードの取得・パースに失敗しました: %w", err)
 	}
 
-	// タイトル情報を含む ArticleInfo のスライスを生成
-	articlesToProcess := make([]ArticleInfo, 0, len(rssFeed.Items))
+	urlsToScrape := make([]string, 0, len(rssFeed.Items))
+	articleTitlesMap := make(map[string]string)
+
 	for _, item := range rssFeed.Items {
 		if item.Link != "" && item.Title != "" {
-			articlesToProcess = append(articlesToProcess, ArticleInfo{URL: item.Link, Title: item.Title})
+			urlsToScrape = append(urlsToScrape, item.Link)
+			articleTitlesMap[item.Link] = item.Title
 		}
 	}
 
-	if len(articlesToProcess) == 0 {
+	if len(urlsToScrape) == 0 {
 		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
 	}
 
-	fmt.Fprintf(os.Stderr, "🌐 記事URL %d件を最大並列数 %d で本文抽出中...\n", len(articlesToProcess), p.Parallel)
+	slog.Info("記事URLの抽出を開始します",
+		slog.Int("urls", len(urlsToScrape)),
+		slog.Int("parallel", p.Parallel),
+		slog.String("feed_url", feedURL),
+	)
 
-	// 2. 並列抽出の実行 (セマフォ制御)
-	sem := semaphore.NewWeighted(int64(p.Parallel))
-	var wg sync.WaitGroup
-	results := make(chan ExtractedArticle, len(articlesToProcess))
+	// --- 2. Scraperによる並列抽出の実行 ---
+	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
 
-	for _, article := range articlesToProcess {
-		wg.Add(1)
-		go func(article ArticleInfo) {
-			defer wg.Done()
-			if err := sem.Acquire(ctx, 1); err != nil {
-				results <- ExtractedArticle{URL: article.URL, Title: article.Title, Error: fmt.Errorf("セマフォ取得失敗: %w", err)}
-				return
-			}
-			defer sem.Release(1)
-
-			// ExtractorはPipelineの依存性として注入されているものを使用
-			content, hasBodyFound, err := p.Extractor.FetchAndExtractText(article.URL, ctx)
-
-			// エラーハンドリングの一貫化
-			var finalErr error
-			if err != nil {
-				finalErr = fmt.Errorf("コンテンツの抽出に失敗しました: %w", err)
-			} else if content == "" || !hasBodyFound {
-				finalErr = fmt.Errorf("URL %s から有効な本文を抽出できませんでした", article.URL)
-			}
-
-			if finalErr != nil && p.Verbose {
-				log.Printf("抽出エラー [%s] (%s): %v", article.Title, article.URL, finalErr)
-			}
-
-			results <- ExtractedArticle{
-				URL:     article.URL,
-				Title:   article.Title,
-				Content: content,
-				Error:   finalErr,
-			}
-		}(article)
-	}
-	wg.Wait()
-	close(results)
-
-	// 3. 結果の結合と出力準備
-	var combinedTextBuilder strings.Builder
-	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", rssFeed.Title))
+	// --- 3. 抽出結果の確認とAI処理の分岐 ---
 	successCount := 0
+	for _, res := range results {
+		if res.Error == nil {
+			successCount++
+		} else {
+			// 修正: WarnレベルのログをVerbose条件から外し、常に重要な情報として出力
+			slog.Warn("抽出エラー",
+				slog.String("url", res.URL),
+				slog.String("error", res.Error.Error()),
+			)
+		}
+	}
 
-	for res := range results {
+	slog.Info("抽出完了",
+		slog.Int("success", successCount),
+		slog.Int("total", len(urlsToScrape)),
+	)
+
+	if successCount == 0 {
+		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
+	}
+
+	// AI処理をスキップするかどうかをLLMAPIKeyの有無で判断
+	if p.LLMAPIKey == "" {
+		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
+	}
+
+	// --- 4. AI処理の実行 (Cleanerによる Map-Reduce) ---
+	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
+
+	// 4-1. コンテンツの結合
+	combinedTextForAI := cleaner.CombineContents(results)
+
+	// 4-2. クリーンアップと構造化の実行
+	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.LLMAPIKey)
+	if err != nil {
+		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
+		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
+	}
+
+	// --- 5. AI処理結果の出力 ---
+	slog.Info("スクリプト生成完了", slog.String("mode", "AI構造化済み"))
+	return iohandler.WriteOutput("", []byte(structuredText))
+}
+
+// processWithoutAI は LLMAPIKeyがない場合に実行される処理
+func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult, titlesMap map[string]string) error {
+	var combinedTextBuilder strings.Builder
+	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
+
+	for _, res := range results {
 		if res.Error != nil {
-			fmt.Fprintf(os.Stderr, "❌ 抽出失敗 [%s]: %v\n", res.URL, res.Error)
+			// エラーはRunでWarnレベルで出力済み。ここではWarningは不要だが、念のためWarnレベルを維持
+			slog.Warn("抽出失敗 (処理スキップ)",
+				slog.String("url", res.URL),
+				slog.String("mode", "AI処理スキップ"),
+			)
 			continue
 		}
 
-		articleTitle := res.Title
+		articleTitle := titlesMap[res.URL]
 		if articleTitle == "" {
 			articleTitle = res.URL
 		}
@@ -142,18 +185,16 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		combinedTextBuilder.WriteString(fmt.Sprintf("## 【記事タイトル】 %s\n\n", articleTitle))
 		combinedTextBuilder.WriteString(res.Content)
 		combinedTextBuilder.WriteString("\n\n---\n\n")
-		successCount++
 	}
-	fmt.Fprintf(os.Stderr, "✅ 抽出完了。成功件数: %d / 処理件数: %d\n", successCount, len(articlesToProcess))
 
-	// 4. 結合テキストの出力 (AI処理スキップ)
 	combinedText := combinedTextBuilder.String()
+
+	// 修正: combinedTextが空の場合のチェックと警告ログの追加
 	if combinedText == "" {
-		return fmt.Errorf("処理すべき記事本文が見つかりませんでした")
+		// RunメソッドでsuccessCount > 0 のチェック済みのため、これはContentが空だった場合に発生
+		slog.Warn("すべての記事本文が空でした。空の出力を生成します。", slog.String("mode", "AI処理スキップ"))
 	}
+	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	fmt.Fprintln(os.Stderr, "\n--- スクリプト生成結果 (AI処理スキップ) ---")
-
-	// iohandler を使用して []byte で出力
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
