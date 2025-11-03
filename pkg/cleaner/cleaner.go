@@ -235,13 +235,40 @@ func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, f
 		return "", fmt.Errorf("LLM Script Generation処理に失敗しました: %w", err)
 	}
 
-	// Script プロンプトはマーカーを使用しないため、そのまま返す
-	return response.Text, nil
+	scriptText := ExtractTextBetweenTags(response.Text, "SCRIPT_START", "SCRIPT_END")
+
+	// 抽出に失敗した場合の処理（例: LLMがタグを出力しなかった場合）
+	if scriptText == "" {
+		// LLMがタグを出力しなかった、または形式が不正だった場合、元のテキストを試す
+		slog.Warn("スクリプトマーカー抽出失敗。LLMのレスポンス全体を返します。")
+		return response.Text, nil
+	}
+
+	// 抽出されたスクリプトを返す
+	return scriptText, nil
 }
 
 // ----------------------------------------------------------------
 // ヘルパー関数群
 // ----------------------------------------------------------------
+
+func ExtractTextBetweenTags(text, startTag, endTag string) string {
+	startMarker := fmt.Sprintf("<%s>", strings.ToUpper(startTag))
+	endMarker := fmt.Sprintf("</%s>", strings.ToUpper(endTag))
+
+	startIndex := strings.Index(text, startMarker)
+	if startIndex == -1 {
+		return ""
+	}
+	startIndex += len(startMarker)
+
+	endIndex := strings.LastIndex(text, endMarker)
+	if endIndex == -1 || endIndex < startIndex {
+		return ""
+	}
+
+	return strings.TrimSpace(text[startIndex:endIndex])
+}
 
 // segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
 // (変更なし)
