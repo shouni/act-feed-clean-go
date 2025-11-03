@@ -20,6 +20,7 @@ import (
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
+// PipelineConfig はパイプライン実行のためのすべての設定値を保持します。
 type PipelineConfig struct {
 	Parallel           int
 	Verbose            bool
@@ -42,15 +43,11 @@ type Pipeline struct {
 	VoicevoxEngine *voicevox.Engine
 	OutputWAVPath  string // 音声合成後の出力ファイルパス
 
-	// 設定値
-	// Configから渡されるようになったため、フィールドは削減可能だが、ここでは互換性のため残す
-	Parallel  int
-	Verbose   bool
-	LLMAPIKey string // LLM処理のためにAPIキーを保持
+	// 💡 修正1: 冗長な設定値フィールドを削除し、PipelineConfigへの参照を保持
+	config PipelineConfig // 設定値への参照を保持
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-// 💡 修正1: New関数の引数を PipelineConfig 構造体一つに集約
 func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 	// ログ設定: slog.Handlerの選択と設定
 	logLevel := slog.LevelInfo
@@ -76,10 +73,10 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
 	}
 
-	// 2. Scraperの初期化 (変更なし)
+	// 2. Scraperの初期化 (configからParallelにアクセス)
 	parallelScraper := scraper.NewParallelScraper(extractor, config.Parallel)
 
-	// 3. Cleanerの初期化 (変更なし)
+	// 3. Cleanerの初期化 (configからVerboseにアクセス)
 	const defaultMapModel = cleaner.DefaultModelName
 	const defaultReduceModel = cleaner.DefaultModelName
 	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, config.Verbose)
@@ -92,7 +89,7 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 	if config.VoicevoxAPIURL != "" {
 		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
 
-		// 💡 修正2: VOICEVOXクライアントに専用の VoicevoxAPITimeout を使用
+		// VOICEVOXクライアントに専用の VoicevoxAPITimeout を使用
 		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
 		// 話者データ Load には ScrapeTimeout を使用（Webからのデータ取得という点で共通）
@@ -124,9 +121,8 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 		VoicevoxEngine: vvEngine,
 		OutputWAVPath:  config.OutputWAVPath,
 
-		Parallel:  config.Parallel,
-		Verbose:   config.Verbose,
-		LLMAPIKey: config.LLMAPIKey,
+		// 💡 修正2: config 構造体全体を保持
+		config: config,
 	}, nil
 }
 
@@ -156,7 +152,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	slog.Info("記事URLの抽出を開始します",
 		slog.Int("urls", len(urlsToScrape)),
-		slog.Int("parallel", p.Parallel),
+		slog.Int("parallel", p.config.Parallel), // 💡 configからParallelにアクセス
 		slog.String("feed_url", feedURL),
 	)
 
@@ -185,8 +181,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力
-	if p.LLMAPIKey == "" {
+	// 💡 修正3: LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力 (p.config.LLMAPIKeyにアクセス)
+	if p.config.LLMAPIKey == "" {
 		slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
 		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
 	}
@@ -196,7 +192,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	combinedTextForAI := cleaner.CombineContents(results)
 
-	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.LLMAPIKey)
+	// 💡 修正4: クリーンアップと構造化の実行 (p.config.LLMAPIKeyにアクセス)
+	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.config.LLMAPIKey)
 	if err != nil {
 		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
@@ -232,7 +229,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	return iohandler.WriteOutput("", []byte(structuredText))
 }
 
-// processWithoutAI は LLMAPIKeyがない場合に実行される処理 (変更なし)
+// processWithoutAI は LLMAPIKeyがない場合に実行される処理
 func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult, titlesMap map[string]string) error {
 	var combinedTextBuilder strings.Builder
 	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
@@ -265,7 +262,6 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	// 💡 修正3: コメントを正確な情報に修正 (iohandler.WriteOutputは []byte を受け取る)
 	// iohandler.WriteOutputの第二引数は []byte を受け取ります。
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
