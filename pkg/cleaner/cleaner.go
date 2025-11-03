@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"act-feed-clean-go/pkg/types"
-
 	"act-feed-clean-go/prompts"
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
