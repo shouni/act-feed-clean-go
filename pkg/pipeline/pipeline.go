@@ -67,7 +67,7 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 	})
 	slog.SetDefault(slog.New(handler))
 
-	// 1. Extractorの初期化 (変更なし)
+	// 1. Extractorの初期化
 	extractor, err := extract.NewExtractor(client)
 	if err != nil {
 		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
