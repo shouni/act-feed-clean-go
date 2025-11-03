@@ -72,6 +72,20 @@ func NewCleaner(client *gemini.Client, config CleanerConfig, verbose bool) (*Cle
 		return nil, fmt.Errorf("LLMクライアントはnilであってはなりません")
 	}
 
+	// デフォルト値の設定を復活させるか、CleanerConfigのコンストラクタで処理する
+	if config.MapModel == "" {
+		config.MapModel = DefaultMapModelName
+	}
+	if config.ReduceModel == "" {
+		config.ReduceModel = DefaultReduceModelName
+	}
+	if config.SummaryModel == "" {
+		config.SummaryModel = DefaultSummaryModelName
+	}
+	if config.ScriptModel == "" {
+		config.ScriptModel = DefaultScriptModelName
+	}
+
 	mapBuilder := prompts.NewMapPromptBuilder()
 	if err := mapBuilder.Err(); err != nil {
 		return nil, fmt.Errorf("Map プロンプトビルダーの初期化に失敗しました: %w", err)
