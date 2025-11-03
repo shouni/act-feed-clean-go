@@ -9,6 +9,7 @@ import (
 	clibase "github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
 
+	"act-feed-clean-go/pkg/cleaner"
 	"act-feed-clean-go/pkg/pipeline"
 
 	"github.com/shouni/go-http-kit/pkg/httpkit"
@@ -27,6 +28,8 @@ type RunFlags struct {
 	VoicevoxAPIURL     string
 	OutputWAVPath      string
 	VoicevoxAPITimeout time.Duration
+	MapModelName       string
+	ReduceModelName    string
 }
 
 var Flags RunFlags
@@ -52,30 +55,28 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
-	// スクレ―ピングとVOICEVOXクライアントでタイムアウトが異なるため、ここでは基盤となるタイムアウトは使用しない
-	// タイムアウトは各パイプライン内で設定される
 	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
 
 	// PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
-		Parallel:           Flags.Parallel,
 		Verbose:            clibase.Flags.Verbose,
+		Parallel:           Flags.Parallel,
 		LLMAPIKey:          Flags.LLMAPIKey,
 		VoicevoxAPIURL:     Flags.VoicevoxAPIURL,
 		OutputWAVPath:      Flags.OutputWAVPath,
 		ScrapeTimeout:      Flags.ScrapeTimeout,
 		VoicevoxAPITimeout: Flags.VoicevoxAPITimeout,
+		MapModelName:       Flags.MapModelName,
+		ReduceModelName:    Flags.ReduceModelName,
 	}
 
 	// 2. Pipelineの初期化と依存性の注入
 	pipelineInstance, err := pipeline.New(httpClient, config)
 	if err != nil {
-		// Extractor, Cleanerの初期化エラーなどを捕捉
 		return fmt.Errorf("パイプラインの初期化に失敗しました: %w", err)
 	}
 
 	// 3. Pipelineの実行
-	// 処理が長くなる可能性があるため、長めのタイムアウトを設定
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -98,6 +99,12 @@ func addRunFlags(runCmd *cobra.Command) {
 		"voicevox-api-timeout", 30*time.Second, "VOICEVOX API (audio_query, synthesis) のHTTPタイムアウト時間")
 	runCmd.Flags().StringVarP(&Flags.OutputWAVPath,
 		"output-wav-path", "v", "asset/audio_output.wav", "音声合成されたWAVファイルの出力パス。")
+
+	// AIモデル名オプションの追加
+	runCmd.Flags().StringVar(&Flags.MapModelName,
+		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
+	runCmd.Flags().StringVar(&Flags.ReduceModelName,
+		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
 var runCmd = &cobra.Command{
@@ -110,7 +117,6 @@ var runCmd = &cobra.Command{
 // Execute は、CLIアプリケーションのエントリポイントです。
 func Execute() {
 	addRunFlags(runCmd)
-	// clibase.Executeは、rootCmdを内部で設定
 	clibase.Execute(
 		"act-feed-clean-go",
 		nil,

@@ -29,6 +29,10 @@ type PipelineConfig struct {
 	OutputWAVPath      string
 	ScrapeTimeout      time.Duration
 	VoicevoxAPITimeout time.Duration
+	// --- 変更点: AIモデル名のフィールドを追加 ---
+	MapModelName    string
+	ReduceModelName string
+	// ------------------------------------------
 }
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
@@ -77,12 +81,21 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 	parallelScraper := scraper.NewParallelScraper(extractor, config.Parallel)
 
 	// 3. Cleanerの初期化 (configからVerboseにアクセス)
-	const defaultMapModel = cleaner.DefaultModelName
-	const defaultReduceModel = cleaner.DefaultModelName
-	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, config.Verbose)
+	// --- 変更点: Configからモデル名を取得し、空の場合はデフォルトを使用するロジックに変更 ---
+	mapModel := config.MapModelName
+	if mapModel == "" {
+		mapModel = cleaner.DefaultMapModelName // cleaner側もこの定数名に更新されると想定
+	}
+	reduceModel := config.ReduceModelName
+	if reduceModel == "" {
+		reduceModel = cleaner.DefaultReduceModelName // cleaner側もこの定数名に更新されると想定
+	}
+
+	llmCleaner, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
 	if err != nil {
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
+	// --------------------------------------------------------------------------
 
 	// 4. VOICEVOX Engineの初期化
 	var vvEngine *voicevox.Engine

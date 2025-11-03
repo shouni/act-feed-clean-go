@@ -11,6 +11,7 @@ import (
 	"act-feed-clean-go/pkg/types"
 
 	"act-feed-clean-go/prompts"
+
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 )
 
@@ -22,6 +23,16 @@ const DefaultSeparator = "\n\n"
 
 // MaxSegmentChars は、MapフェーズでLLMに一度に渡す安全な最大文字数。
 const MaxSegmentChars = 400000
+
+// ----------------------------------------------------------------
+// モデル名定数の定義 (変更点)
+// ----------------------------------------------------------------
+
+// DefaultMapModelName は Mapフェーズのデフォルトモデル名です。
+const DefaultMapModelName = "gemini-2.5-flash"
+
+// DefaultReduceModelName は Reduceフェーズのデフォルトモデル名です。
+const DefaultReduceModelName = "gemini-2.5-flash"
 
 // ----------------------------------------------------------------
 // Cleaner 構造体とコンストラクタ
@@ -36,16 +47,14 @@ type Cleaner struct {
 	Verbose         bool
 }
 
-// DefaultModelName は Map/Reduce のデフォルトモデル名です。
-const DefaultModelName = "gemini-2.5-flash"
-
 // NewCleaner は新しいCleanerインスタンスを作成し、PromptBuilderを初期化します。
 func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
+	// 変更点: 引数が空の場合は、それぞれ新しいデフォルト定数を使用
 	if mapModel == "" {
-		mapModel = DefaultModelName
+		mapModel = DefaultMapModelName
 	}
 	if reduceModel == "" {
-		reduceModel = DefaultModelName
+		reduceModel = DefaultReduceModelName
 	}
 
 	mapBuilder := prompts.NewMapPromptBuilder()
@@ -135,6 +144,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 		return "", fmt.Errorf("最終 Reduce プロンプトの生成に失敗しました: %w", err)
 	}
 
+	// Reduceフェーズのモデル名に c.ReduceModelName を使用
 	finalResponse, err := client.GenerateContent(ctx, finalPrompt, c.ReduceModelName)
 	if err != nil {
 		return "", fmt.Errorf("LLM最終構造化処理（Reduceフェーズ）に失敗しました: %w", err)
@@ -249,6 +259,7 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 				return
 			}
 
+			// Mapフェーズのモデル名に c.MapModelName を使用
 			response, err := client.GenerateContent(ctx, prompt, c.MapModelName)
 
 			if err != nil {
