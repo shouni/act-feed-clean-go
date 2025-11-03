@@ -136,7 +136,7 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 
 	for _, res := range results {
 		if res.Error != nil {
-			fmt.Fprintf(os.Stderr, "❌ 抽出失敗 [%s]\n", res.URL) // エラー詳細表示はRun内のVerboseログに任せる
+			fmt.Fprintf(os.Stderr, "❌ 抽出失敗 [%s]: %v\n", res.URL, res.Error)
 			continue
 		}
 
