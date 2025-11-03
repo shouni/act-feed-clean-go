@@ -54,7 +54,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	}
 	// スクレ―ピングとVOICEVOXクライアントでタイムアウトが異なるため、ここでは基盤となるタイムアウトは使用しない
 	// タイムアウトは各パイプライン内で設定される
-	httpClient := httpkit.New(0, clientOptions...)
+	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
 
 	// 💡 修正1: PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
