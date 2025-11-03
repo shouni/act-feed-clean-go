@@ -139,7 +139,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
 	combinedTextForAI := cleaner.CombineContents(results)
-	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.config.LLMAPIKey)
+	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI)
 	if err != nil {
 		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)

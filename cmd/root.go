@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
@@ -99,11 +100,29 @@ func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConf
 	if reduceModel == "" {
 		reduceModel = cleaner.DefaultReduceModelName
 	}
-	cleanerInstance, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
-	if err != nil {
-		slog.Error("クリーナーの初期化に失敗しました", slog.String("error", err.Error()))
-		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+
+	var client *gemini.Client
+	ctx := context.Background()
+	if config.LLMAPIKey != "" {
+		client, err = gemini.NewClient(ctx, gemini.Config{APIKey: Flags.LLMAPIKey})
+	} else {
+		client, err = gemini.NewClientFromEnv(ctx)
 	}
+
+	if err != nil {
+		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
+	}
+
+	// 2. クリーナーの初期化
+	cleanerInstance, err := cleaner.NewCleaner(
+		client,
+		Flags.MapModelName,
+		Flags.ReduceModelName,
+		cleaner.DefaultSummaryModelName,
+		cleaner.DefaultScriptModelName,
+		config.Verbose,
+	)
 
 	// 4. VOICEVOX Engineの初期化
 	var vvEngine *voicevox.Engine

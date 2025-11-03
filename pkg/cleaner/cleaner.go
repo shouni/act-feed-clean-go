@@ -25,7 +25,7 @@ const DefaultSeparator = "\n\n"
 const MaxSegmentChars = 400000
 
 // ----------------------------------------------------------------
-// モデル名定数の定義 (変更点)
+// モデル名定数の定義
 // ----------------------------------------------------------------
 
 // DefaultMapModelName は Mapフェーズのデフォルトモデル名です。
@@ -34,27 +34,49 @@ const DefaultMapModelName = "gemini-2.5-flash"
 // DefaultReduceModelName は Reduceフェーズのデフォルトモデル名です。
 const DefaultReduceModelName = "gemini-2.5-flash"
 
+// DefaultSummaryModelName は FinalSummaryフェーズのデフォルトモデル名です。 (新規)
+const DefaultSummaryModelName = "gemini-2.5-flash"
+
+// DefaultScriptModelName は ScriptGenerationフェーズのデフォルトモデル名です。 (新規)
+const DefaultScriptModelName = "gemini-2.5-flash"
+
 // ----------------------------------------------------------------
 // Cleaner 構造体とコンストラクタ
 // ----------------------------------------------------------------
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
 type Cleaner struct {
-	mapBuilder      *prompts.PromptBuilder
-	reduceBuilder   *prompts.PromptBuilder
-	MapModelName    string
-	ReduceModelName string
-	Verbose         bool
+	client              *gemini.Client // 修正: LLMクライアントを注入
+	mapBuilder          *prompts.PromptBuilder
+	reduceBuilder       *prompts.PromptBuilder
+	finalSummaryBuilder *prompts.PromptBuilder
+	scriptBuilder       *prompts.PromptBuilder
+	MapModelName        string
+	ReduceModelName     string
+	SummaryModelName    string
+	ScriptModelName     string
+	Verbose             bool
 }
 
-// NewCleaner は新しいCleanerインスタンスを作成し、PromptBuilderを初期化します。
-func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
-	// 変更点: 引数が空の場合は、それぞれ新しいデフォルト定数を使用
+// NewCleaner は新しいCleanerインスタンスを作成し、依存関係とPromptBuilderを初期化します。
+// 修正: クライアントインスタンスと全モデル名を受け取ります。
+func NewCleaner(client *gemini.Client, mapModel, reduceModel, summaryModel, scriptModel string, verbose bool) (*Cleaner, error) {
+	if client == nil {
+		return nil, fmt.Errorf("LLMクライアントはnilであってはなりません")
+	}
+
+	// デフォルト値の設定
 	if mapModel == "" {
 		mapModel = DefaultMapModelName
 	}
 	if reduceModel == "" {
 		reduceModel = DefaultReduceModelName
+	}
+	if summaryModel == "" {
+		summaryModel = DefaultSummaryModelName
+	}
+	if scriptModel == "" {
+		scriptModel = DefaultScriptModelName
 	}
 
 	mapBuilder := prompts.NewMapPromptBuilder()
@@ -66,12 +88,29 @@ func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 		return nil, fmt.Errorf("Reduce プロンプトビルダーの初期化に失敗しました: %w", err)
 	}
 
+	// 新規追加
+	finalSummaryBuilder := prompts.NewFinalSummaryPromptBuilder()
+	if err := finalSummaryBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Final Summary プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+
+	// 新規追加
+	scriptBuilder := prompts.NewScriptPromptBuilder()
+	if err := scriptBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Script プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+
 	return &Cleaner{
-		mapBuilder:      mapBuilder,
-		reduceBuilder:   reduceBuilder,
-		MapModelName:    mapModel,
-		ReduceModelName: reduceModel,
-		Verbose:         verbose,
+		client:              client, // 注入
+		mapBuilder:          mapBuilder,
+		reduceBuilder:       reduceBuilder,
+		finalSummaryBuilder: finalSummaryBuilder, // 新規追加
+		scriptBuilder:       scriptBuilder,       // 新規追加
+		MapModelName:        mapModel,
+		ReduceModelName:     reduceModel,
+		SummaryModelName:    summaryModel, // 新規追加
+		ScriptModelName:     scriptModel,  // 新規追加
+		Verbose:             verbose,
 	}, nil
 }
 
@@ -80,6 +119,7 @@ func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 // ----------------------------------------------------------------
 
 // CombineContents は、成功した抽出結果の本文を効率的に結合します。
+// (変更なし)
 func CombineContents(results []types.URLResult) string {
 	var builder strings.Builder
 
@@ -106,51 +146,96 @@ func CombineContents(results []types.URLResult) string {
 }
 
 // CleanAndStructureText は、コンテンツをMap-Reduceパターンで構造化します。
-func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string, apiKeyOverride string) (string, error) {
+// 修正: 中間統合要約 (Intermediate Summary) を生成する役割に変更し、apiKeyOverrideを削除
+func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string) (string, error) {
 
-	// 1. LLMクライアントの初期化 (省略)
-	var client *gemini.Client
-	var err error
-
-	if apiKeyOverride != "" {
-		client, err = gemini.NewClient(ctx, gemini.Config{APIKey: apiKeyOverride})
-	} else {
-		client, err = gemini.NewClientFromEnv(ctx)
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください: %w", err)
-	}
+	// 1. LLMクライアントの初期化 (削除)
 
 	// 2. Mapフェーズのためのテキスト分割
 	segments := c.segmentText(combinedText, MaxSegmentChars)
 	slog.Info("テキストをセグメントに分割しました", slog.Int("segments", len(segments)))
 
 	// 3. Mapフェーズの実行（各セグメントの並列処理）
-	intermediateSummaries, err := c.processSegmentsInParallel(ctx, client, segments)
+	// c.client を使用
+	intermediateSummaries, err := c.processSegmentsInParallel(ctx, c.client, segments)
 	if err != nil {
+		// このエラーは Map-Reduce の最初のReduceが実行される前の、中間要約の結合テキストになる
 		return "", fmt.Errorf("セグメント処理（Mapフェーズ）に失敗しました: %w", err)
 	}
 
 	// 4. Reduceフェーズの準備：中間要約の結合
-	finalCombinedText := strings.Join(intermediateSummaries, "\n\n--- INTERMEDIATE SUMMARY END ---\n\n")
+	intermediateCombinedText := strings.Join(intermediateSummaries, "\n\n--- INTERMEDIATE SUMMARY END ---\n\n")
 
-	// 5. Reduceフェーズ：最終的な統合と構造化のためのLLM呼び出し (省略)
-	slog.Info("中間要約の結合が完了しました。最終的な構造化（Reduceフェーズ）を開始します。")
+	// 5. Reduceフェーズ：中間要約の統合と構造化のためのLLM呼び出し
+	slog.Info("中間要約の結合が完了しました。Reduceフェーズ（中間統合要約）を開始します。")
 
-	reduceData := prompts.ReduceTemplateData{CombinedText: finalCombinedText}
+	// Reduce プロンプト（reduce_final_prompt.md）を使用して中間統合要約を作成
+	reduceData := prompts.ReduceTemplateData{CombinedText: intermediateCombinedText}
 	finalPrompt, err := c.reduceBuilder.BuildReduce(reduceData)
 	if err != nil {
-		return "", fmt.Errorf("最終 Reduce プロンプトの生成に失敗しました: %w", err)
+		return "", fmt.Errorf("Reduce プロンプトの生成に失敗しました: %w", err)
 	}
 
 	// Reduceフェーズのモデル名に c.ReduceModelName を使用
-	finalResponse, err := client.GenerateContent(ctx, finalPrompt, c.ReduceModelName)
+	finalResponse, err := c.client.GenerateContent(ctx, finalPrompt, c.ReduceModelName)
 	if err != nil {
-		return "", fmt.Errorf("LLM最終構造化処理（Reduceフェーズ）に失敗しました: %w", err)
+		return "", fmt.Errorf("LLM Reduce処理（中間統合要約）に失敗しました: %w", err)
 	}
 
+	// Reduceの結果（中間統合要約）を返します。
+	// このテキストは、次の FinalSummary の入力となります。
 	return finalResponse.Text, nil
+}
+
+// ----------------------------------------------------------------
+// 新規追加の LLM 処理メソッド
+// ----------------------------------------------------------------
+
+// GenerateFinalSummary は、中間統合要約を元に、簡潔な最終要約を生成します。
+func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, intermediateSummary string) (string, error) {
+	slog.Info("Final Summary Generation（最終要約）を開始します。")
+
+	// Final Summary プロンプト（final_summary_prompt.md）を使用して最終要約を作成
+	summaryData := prompts.FinalSummaryTemplateData{
+		Title:               title,
+		IntermediateSummary: intermediateSummary,
+	}
+	prompt, err := c.finalSummaryBuilder.BuildFinalSummary(summaryData)
+	if err != nil {
+		return "", fmt.Errorf("Final Summary プロンプトの生成に失敗しました: %w", err)
+	}
+
+	// SummaryModelName を使用
+	response, err := c.client.GenerateContent(ctx, prompt, c.SummaryModelName)
+	if err != nil {
+		return "", fmt.Errorf("LLM Final Summary処理（最終要約）に失敗しました: %w", err)
+	}
+
+	return response.Text, nil
+}
+
+// GenerateScriptForVoicevox は、最終要約を元に、VOICEVOXエンジン向けのスクリプトを生成します。
+func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, finalSummary string) (string, error) {
+	slog.Info("Script Generation（スクリプト作成）を開始します。")
+
+	// Script プロンプト（zundametan_duet.md）を使用してスクリプトを作成
+	scriptData := prompts.ScriptTemplateData{
+		Title:            title,
+		FinalSummaryText: finalSummary,
+	}
+	prompt, err := c.scriptBuilder.BuildScript(scriptData)
+	if err != nil {
+		return "", fmt.Errorf("Script プロンプトの生成に失敗しました: %w", err)
+	}
+
+	// ScriptModelName を使用
+	response, err := c.client.GenerateContent(ctx, prompt, c.ScriptModelName)
+	if err != nil {
+		return "", fmt.Errorf("LLM Script Generation処理に失敗しました: %w", err)
+	}
+
+	// Script プロンプトはマーカーを使用しないため、そのまま返す
+	return response.Text, nil
 }
 
 // ----------------------------------------------------------------
@@ -158,6 +243,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 // ----------------------------------------------------------------
 
 // segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
+// (変更なし)
 func (c *Cleaner) segmentText(text string, maxChars int) []string {
 	var segments []string
 	current := []rune(text)
