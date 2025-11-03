@@ -7,11 +7,10 @@ import (
 	"strings"
 	"sync"
 	"unicode"
-	// 組み込みmax関数を使用するため、mathパッケージのimportは不要
 
 	"act-feed-clean-go/pkg/types"
 
-	"github.com/shouni/action-perfect-get-on-go/prompts"
+	"act-feed-clean-go/prompts"
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 )
 

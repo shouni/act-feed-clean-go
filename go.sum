@@ -85,8 +85,6 @@ github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
-github.com/shouni/action-perfect-get-on-go v1.0.5 h1:JpOReNh70ACf92JoQoDq4Xai4AFkxyWo/1iKSREi1eQ=
-github.com/shouni/action-perfect-get-on-go v1.0.5/go.mod h1:Df5qx9wWsduds9cY+YBiaJz/pKGclcovfTf4zmKyCCI=
 github.com/shouni/go-ai-client/v2 v2.0.2 h1:9fej/MkJPAWv1M8Ljdbu2hmEkhFix9rpnQtMrCfpVpA=
 github.com/shouni/go-ai-client/v2 v2.0.2/go.mod h1:/qv/8cVRGaEBVJaRpe77wgHDwr80swJ6FumSHHoMJPI=
 github.com/shouni/go-cli-base v1.0.4 h1:h1jdvAxjUiS0AEn4ein0nc7E5bn3RtKiv8YkHeRc9Ak=
