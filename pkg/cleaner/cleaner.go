@@ -257,12 +257,7 @@ func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, f
 
 func ExtractTextBetweenTags(text, startTag, endTag string) string {
 	startMarker := fmt.Sprintf("<%s>", strings.ToUpper(startTag))
-	// 閉じタグは、</TAG> と <TAG> の両方に対応するため、正規表現は使わず、
-	// まず </TAG> を試行し、なければ <TAG> を試行するロジックに変更
-
-	// 試行 1: 標準的な閉じタグ (例: </SCRIPT_END>)
 	endMarker1 := fmt.Sprintf("</%s>", strings.ToUpper(endTag))
-	// 試行 2: スラッシュなしの閉じタグ (LLMがよく間違えるパターン)
 	endMarker2 := fmt.Sprintf("<%s>", strings.ToUpper(endTag))
 
 	startIndex := strings.Index(text, startMarker)
@@ -271,11 +266,16 @@ func ExtractTextBetweenTags(text, startTag, endTag string) string {
 	}
 	startIndex += len(startMarker)
 
-	// 最初に </SCRIPT_END> の位置を探す
-	endIndex := strings.LastIndex(text, endMarker1)
-	if endIndex == -1 {
-		// 見つからなければ <SCRIPT_END> の位置を探す
-		endIndex = strings.LastIndex(text, endMarker2)
+	// 最初に startIndex 以降で </SCRIPT_END> の位置を探す
+	endIndex := strings.Index(text[startIndex:], endMarker1)
+	if endIndex != -1 {
+		endIndex += startIndex // 全体文字列での位置に変換
+	} else {
+		// 見つからなければ startIndex 以降で <SCRIPT_END> の位置を探す
+		endIndex = strings.Index(text[startIndex:], endMarker2)
+		if endIndex != -1 {
+			endIndex += startIndex // 全体文字列での位置に変換
+		}
 	}
 
 	if endIndex == -1 || endIndex < startIndex {
