@@ -112,13 +112,19 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 	}
 
 	// 2. クリーナーの初期化
+	// CleanerConfig 構造体を構築
+	cleanerConfig := cleaner.CleanerConfig{
+		MapModel:     Flags.MapModelName,
+		ReduceModel:  Flags.ReduceModelName,
+		SummaryModel: Flags.SummaryModelName,
+		ScriptModel:  Flags.ScriptModelName,
+		Verbose:      config.Verbose,
+	}
+
+	// 新しいシグネチャで NewCleaner を呼び出す
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
-		Flags.MapModelName,
-		Flags.ReduceModelName,
-		Flags.SummaryModelName,
-		Flags.ScriptModelName,
-		config.Verbose,
+		cleanerConfig,
 	)
 
 	// 4. VOICEVOX Engineの初期化
