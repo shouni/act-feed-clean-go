@@ -20,7 +20,7 @@ import (
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
-// PipelineConfig はパイプライン実行のためのすべての設定値を保持します。
+// PipelineConfig はパイプライン実行のためのすべての設定値を保持します。（変更なし）
 type PipelineConfig struct {
 	Parallel           int
 	Verbose            bool
@@ -29,13 +29,11 @@ type PipelineConfig struct {
 	OutputWAVPath      string
 	ScrapeTimeout      time.Duration
 	VoicevoxAPITimeout time.Duration
-	// --- 変更点: AIモデル名のフィールドを追加 ---
-	MapModelName    string
-	ReduceModelName string
-	// ------------------------------------------
+	MapModelName       string
+	ReduceModelName    string
 }
 
-// Pipeline は記事の取得から結合までの一連の流れを管理します。
+// Pipeline は記事の取得から結合までの一連の流れを管理します。（変更なし）
 type Pipeline struct {
 	Client    *httpkit.Client
 	Extractor *extract.Extractor
@@ -52,20 +50,50 @@ type Pipeline struct {
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
-	// ログ設定: slog.Handlerの選択と設定
+// 変更点: 依存関係 (Extractor, Scraper, Cleaner, VoicevoxEngine) を引数で受け取る
+func New(
+	client *httpkit.Client,
+	extractor *extract.Extractor,
+	s scraper.Scraper, // 's' は scraper.Scraper の意
+	c *cleaner.Cleaner, // 'c' は *cleaner.Cleaner の意
+	vvEngine *voicevox.Engine,
+	config PipelineConfig,
+) *Pipeline {
+	// ログ設定: New関数からログ初期化ロジックを移動または簡略化
+	// ログ初期化は通常、アプリケーションのエントリポイント（cmd/root.go）で行うべきですが、
+	// ここでは New に依存関係がないため、冗長なコードを削除します。
+
+	return &Pipeline{
+		Client:    client,
+		Extractor: extractor,
+		Scraper:   s,
+		Cleaner:   c,
+
+		VoicevoxEngine: vvEngine,
+		OutputWAVPath:  config.OutputWAVPath,
+
+		// 設定値全体を保持
+		config: config,
+	}
+}
+
+// NewPipelineDependencies は、NewPipelineWithDependencies の前に呼び出され、
+// Pipeline に必要なすべての依存関係を構築します。
+// この関数は、旧 New 関数の内部ロジックを保持します。
+func NewPipelineDependencies(client *httpkit.Client, config PipelineConfig) (*extract.Extractor, scraper.Scraper, *cleaner.Cleaner, *voicevox.Engine, error) {
+	// ログ設定は呼び出し元 (cmd/root.go) に移譲することを推奨しますが、
+	// 互換性のため、設定は保持し、初期化のみを行います。
+
 	logLevel := slog.LevelInfo
 	if config.Verbose {
 		logLevel = slog.LevelDebug
 	}
-
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
 				return slog.Attr{}
 			}
-			// Timeキー以外の属性はそのまま返す
 			return a
 		},
 	})
@@ -74,13 +102,13 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 	// 1. Extractorの初期化
 	extractor, err := extract.NewExtractor(client)
 	if err != nil {
-		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
 	}
 
-	// 2. Scraperの初期化 (configからParallelにアクセス)
+	// 2. Scraperの初期化
 	parallelScraper := scraper.NewParallelScraper(extractor, config.Parallel)
 
-	// 3. Cleanerの初期化 (configからVerboseにアクセス)
+	// 3. Cleanerの初期化
 	mapModel := config.MapModelName
 	if mapModel == "" {
 		mapModel = cleaner.DefaultMapModelName
@@ -89,30 +117,27 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 	if reduceModel == "" {
 		reduceModel = cleaner.DefaultReduceModelName
 	}
-
 	llmCleaner, err := cleaner.NewCleaner(mapModel, reduceModel, config.Verbose)
 	if err != nil {
-		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
-	// --------------------------------------------------------------------------
 
 	// 4. VOICEVOX Engineの初期化
 	var vvEngine *voicevox.Engine
 	if config.VoicevoxAPIURL != "" {
 		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
 
-		// VOICEVOXクライアントに専用の VoicevoxAPITimeout を使用
 		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
-		// 話者データ Load には VoicevoxAPITimeout を使用
 		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
 		defer cancel()
 
-		// voicevox.LoadSpeakers は voicevox.Engine が依存する speakerData を取得
 		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
 		if loadErr != nil {
-			return nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
+			cancel() // タイムアウトを確実に停止
+			return nil, nil, nil, nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
 		}
+		cancel() // タイムアウトを確実に停止
 
 		parser := voicevox.NewTextParser()
 		engineConfig := voicevox.EngineConfig{
@@ -120,25 +145,13 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 			SegmentTimeout:      voicevox.DefaultSegmentTimeout,
 		}
 
-		// Engineの組み立てとExecutorとしての返却
 		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
 	}
 
-	return &Pipeline{
-		Client:    client,
-		Extractor: extractor,
-		Scraper:   parallelScraper,
-		Cleaner:   llmCleaner,
-
-		VoicevoxEngine: vvEngine,
-		OutputWAVPath:  config.OutputWAVPath,
-
-		// 設定値全体を保持
-		config: config,
-	}, nil
+	return extractor, parallelScraper, llmCleaner, vvEngine, nil
 }
 
-// Run はフィードの取得、記事の並列抽出、AI処理、およびI/O処理を実行します。
+// Run, processWithoutAI 関数は DI の変更による影響を受けないため、そのまま保持します。
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// --- 1. RSSフィードの取得とURLリスト生成 ---

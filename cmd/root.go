@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog" // ログのためにslogを追加
 	"os"
 	"time"
 
@@ -40,6 +41,8 @@ var Flags RunFlags
 
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
 func runCmdFunc(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	// APIキーのチェック（環境変数から取得を試みる）
 	if Flags.LLMAPIKey == "" {
 		Flags.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
@@ -50,12 +53,15 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		Flags.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
 	}
 
-	// 1. HTTPクライアントの初期化
+	// 1. HTTPクライアントの初期化 (リトライ機能付きのクライアントを使用)
+	// NOTE: clibase.NewHTTPClient() が利用可能ならそちらを使用するが、ここでは httpkit.New を直接使用
 	const maxRetries = 3
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
+	// ScrapeTimeoutをベースタイムアウトとして使用
 	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
+	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", Flags.ScrapeTimeout))
 
 	// PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
@@ -70,14 +76,30 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		ReduceModelName:    Flags.ReduceModelName,
 	}
 
-	// 2. Pipelineの初期化と依存性の注入
-	pipelineInstance, err := pipeline.New(httpClient, config)
+	// 2. 依存関係の構築 (DIの準備)
+	// 新しい NewPipelineDependencies を呼び出し、全ての依存関係を構築
+	extractor, scraper, cleaner, vvEngine, err := pipeline.NewPipelineDependencies(httpClient, config)
 	if err != nil {
-		return fmt.Errorf("パイプラインの初期化に失敗しました: %w", err)
+		slog.Error("パイプライン依存関係の構築に失敗しました", slog.String("error", err.Error()))
+		// VOICEVOX話者ロード失敗など、初期化時の致命的なエラーをここで捕捉
+		return fmt.Errorf("パイプライン依存関係の構築に失敗しました: %w", err)
 	}
 
-	// 3. Pipelineの実行
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// 3. Pipelineインスタンスを生成（依存関係を注入）
+	pipelineInstance := pipeline.New(
+		httpClient,
+		extractor,
+		scraper,
+		cleaner,
+		vvEngine,
+		config,
+	)
+
+	// 4. Pipelineの実行
+	// Run自体に内部タイムアウト機構（ScrapeTimeoutなど）が含まれているため、
+	// ここでの WithTimeout は全体実行時間の上限として残します。
+	// NOTE: context.Background() ではなく、cmd.Context() を使用
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
