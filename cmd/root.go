@@ -20,10 +20,12 @@ import (
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
 type RunFlags struct {
-	LLMAPIKey     string
-	FeedURL       string
-	Parallel      int
-	ScrapeTimeout time.Duration
+	LLMAPIKey      string
+	FeedURL        string
+	Parallel       int
+	ScrapeTimeout  time.Duration
+	VoicevoxAPIURL string
+	OutputWAVPath  string
 }
 
 var Flags RunFlags
@@ -39,7 +41,12 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		Flags.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
 	}
 
-	// NOTE: LLMAPIKeyがない場合はAI処理がスキップされるため、ここでエラーにはしない。
+	// VOICEVOX API URLのチェック（環境変数から取得を試みる）
+	if Flags.VoicevoxAPIURL == "" {
+		Flags.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
+	}
+
+	// NOTE: LLMAPIKeyやVoicevoxAPIURLがない場合はAI処理や音声化がスキップされるため、ここでエラーにはしない。
 
 	// 1. HTTPクライアントの初期化
 	const maxRetries = 3
@@ -49,8 +56,15 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
 
 	// 2. Pipelineの初期化と依存性の注入
-	// 修正: clibase.Flags.Verbose と Flags.LLMAPIKey の値を渡す
-	pipelineInstance, err := pipeline.New(httpClient, Flags.Parallel, clibase.Flags.Verbose, Flags.LLMAPIKey)
+	pipelineInstance, err := pipeline.New(
+		httpClient,
+		Flags.Parallel,
+		clibase.Flags.Verbose,
+		Flags.LLMAPIKey,
+		Flags.VoicevoxAPIURL,
+		Flags.OutputWAVPath,
+		Flags.ScrapeTimeout, // 新しく追加した引数
+	)
 	if err != nil {
 		// Extractor, Cleanerの初期化エラーなどを捕捉
 		return fmt.Errorf("パイプラインの初期化に失敗しました: %w", err)
@@ -66,10 +80,18 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 // addRunFlags は 'run' コマンドに固有のフラグを設定します。
 func addRunFlags(runCmd *cobra.Command) {
-	runCmd.Flags().StringVarP(&Flags.LLMAPIKey, "llm-api-key", "k", "", "Gemini APIキー (これが設定されている場合のみAI処理が実行されます)")
-	runCmd.Flags().StringVarP(&Flags.FeedURL, "feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
-	runCmd.Flags().IntVarP(&Flags.Parallel, "parallel", "p", 10, "Webスクレイピングの最大同時並列リクエスト数")
-	runCmd.Flags().DurationVarP(&Flags.ScrapeTimeout, "scraper-timeout", "s", 15*time.Second, "WebスクレイピングのHTTPタイムアウト時間")
+	runCmd.Flags().StringVarP(&Flags.LLMAPIKey,
+		"llm-api-key", "k", "", "Gemini APIキー (これが設定されている場合のみAI処理が実行されます)")
+	runCmd.Flags().StringVarP(&Flags.FeedURL,
+		"feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
+	runCmd.Flags().IntVarP(&Flags.Parallel,
+		"parallel", "p", 10, "Webスクレイピングの最大同時並列リクエスト数")
+	runCmd.Flags().DurationVarP(&Flags.ScrapeTimeout,
+		"scraper-timeout", "s", 15*time.Second, "WebスクレイピングのHTTPタイムアウト時間")
+	runCmd.Flags().StringVar(&Flags.VoicevoxAPIURL,
+		"voicevox-api-url", "", "VOICEVOXエンジンのAPI URL。環境変数 VOICEVOX_API_URL から読み込みます。")
+	runCmd.Flags().StringVar(&Flags.OutputWAVPath,
+		"output-wav-path", "v", "音声合成されたWAVファイルの出力パス。このフラグと--voicevox-api-urlが設定されている場合、WAVファイルが出力されます。")
 }
 
 var runCmd = &cobra.Command{
