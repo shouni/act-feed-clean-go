@@ -35,6 +35,8 @@ type RunFlags struct {
 	VoicevoxAPITimeout time.Duration
 	MapModelName       string
 	ReduceModelName    string
+	SummaryModelName   string
+	ScriptModelName    string
 }
 
 var Flags RunFlags
@@ -122,8 +124,8 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 		client,
 		Flags.MapModelName,
 		Flags.ReduceModelName,
-		cleaner.DefaultSummaryModelName,
-		cleaner.DefaultScriptModelName,
+		Flags.SummaryModelName,
+		Flags.ScriptModelName,
 		config.Verbose,
 	)
 
@@ -246,6 +248,10 @@ func addRunFlags(runCmd *cobra.Command) {
 		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ReduceModelName,
 		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
+	runCmd.Flags().StringVar(&Flags.MapModelName,
+		"summary-model", cleaner.DefaultSummaryModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
+	runCmd.Flags().StringVar(&Flags.ReduceModelName,
+		"script-model", cleaner.DefaultScriptModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
 var runCmd = &cobra.Command{
