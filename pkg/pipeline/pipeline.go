@@ -92,8 +92,8 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 		// VOICEVOXクライアントに専用の VoicevoxAPITimeout を使用
 		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
-		// 話者データ Load には ScrapeTimeout を使用（Webからのデータ取得という点で共通）
-		loadCtx, cancel := context.WithTimeout(context.Background(), config.ScrapeTimeout)
+		// 話者データ Load には VoicevoxAPITimeout を使用
+		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
 		defer cancel()
 
 		// voicevox.LoadSpeakers は voicevox.Engine が依存する speakerData を取得
@@ -221,9 +221,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		// 音声合成が成功したら、以降のテキスト出力処理をスキップしてここで終了
 		return nil
 	}
-
-	// --- 5-B. テキスト出力にフォールバック (従来の処理) ---
-	slog.Info("AI生成スクリプトをテキストとして出力します", slog.String("mode", "AI構造化済み (テキスト)"))
 
 	// AI処理が実行されたが音声合成が行われない場合、テキスト出力を実行
 	return iohandler.WriteOutput("", []byte(structuredText))
