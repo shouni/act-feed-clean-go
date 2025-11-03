@@ -29,8 +29,6 @@ type PipelineConfig struct {
 	OutputWAVPath      string
 	ScrapeTimeout      time.Duration
 	VoicevoxAPITimeout time.Duration
-	MapModelName       string
-	ReduceModelName    string
 }
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。

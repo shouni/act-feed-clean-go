@@ -42,7 +42,9 @@ type RunFlags struct {
 var Flags RunFlags
 
 const (
-	maxRetries            = 3
+	maxRetries = 3
+	// contextTimeout は、パイプライン全体の実行に許容される最大時間です。
+	// LLM呼び出しの増加と、より複雑な処理ステップに対応するため、20分に延長されました。
 	contextTimeout        = 20 * time.Minute
 	maxParallelSegments   = voicevox.DefaultMaxParallelSegments
 	defaultSegmentTimeout = voicevox.DefaultSegmentTimeout
@@ -103,15 +105,6 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
 
 	// 3. Cleanerの初期化
-	mapModel := config.MapModelName
-	if mapModel == "" {
-		mapModel = cleaner.DefaultMapModelName
-	}
-	reduceModel := config.ReduceModelName
-	if reduceModel == "" {
-		reduceModel = cleaner.DefaultReduceModelName
-	}
-
 	var client *gemini.Client
 	client, err = initLLMClient(ctx, config.LLMAPIKey)
 	if err != nil {
@@ -195,8 +188,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		OutputWAVPath:      Flags.OutputWAVPath,
 		ScrapeTimeout:      Flags.ScrapeTimeout,
 		VoicevoxAPITimeout: Flags.VoicevoxAPITimeout,
-		MapModelName:       Flags.MapModelName,
-		ReduceModelName:    Flags.ReduceModelName,
 	}
 
 	// 2. 依存関係の構築（ヘルパー関数に委譲）
