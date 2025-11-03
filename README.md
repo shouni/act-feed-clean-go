@@ -72,7 +72,7 @@ AI処理や音声合成を実行する際には、以下の環境変数または
 | 変数名 | 必須/任意 | 説明 |
 | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | 任意 (AI処理実行時必須) | Google AI Studio で取得した Gemini API キー。`--llm-api-key` フラグで上書き可能です。 |
-| `VOICEVOX_API_URL` | 任意 (音声合成実行時必須) | 起動中の VOICEVOXエンジンのAPI URL。`--voicevox-api-url` フラグで上書き可能です。 |
+| `VOICEVOX_API_URL` | 任意 (音声合成実行時必須) | 起動中の VOICEVOXエンジンのAPI URL。環境変数からも読み込み、`--voicevox-api-url` フラグで上書き可能です。 |
 
 ### 2\. 実行コマンド
 
