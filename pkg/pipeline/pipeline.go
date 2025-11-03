@@ -3,7 +3,7 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -32,8 +32,27 @@ type Pipeline struct {
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
-// LLMAPIKeyはcmd/root.goから渡されます。
 func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (*Pipeline, error) {
+
+	// ログ設定: slog.Handlerの選択と設定
+	// Verboseが設定されている場合、ログレベルをDebug以上にする
+	logLevel := slog.LevelInfo
+	if verbose {
+		logLevel = slog.LevelDebug
+	}
+
+	// TextHandler (ログをkey=value形式で出力) を使用
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+		// Timeの表示を抑制
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	slog.SetDefault(slog.New(handler))
 
 	// 1. Extractorの初期化 (Scraperが依存)
 	extractor, err := extract.NewExtractor(client)
@@ -45,7 +64,6 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (
 	parallelScraper := scraper.NewParallelScraper(extractor, parallel)
 
 	// 3. Cleanerの初期化 (AI処理ロジックをカプセル化)
-	// NewCleanerにデフォルトモデル名とverboseフラグを渡す
 	const defaultMapModel = cleaner.DefaultModelName
 	const defaultReduceModel = cleaner.DefaultModelName
 	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, verbose)
@@ -56,11 +74,11 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (
 	return &Pipeline{
 		Client:    client,
 		Extractor: extractor,
-		Scraper:   parallelScraper, // 注入
-		Cleaner:   llmCleaner,      // 注入
+		Scraper:   parallelScraper,
+		Cleaner:   llmCleaner,
 		Parallel:  parallel,
 		Verbose:   verbose,
-		LLMAPIKey: llmAPIKey, // 保持
+		LLMAPIKey: llmAPIKey,
 	}, nil
 }
 
@@ -70,11 +88,11 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	// --- 1. RSSフィードの取得とURLリスト生成 ---
 	rssFeed, err := feed.FetchAndParse(ctx, p.Client, feedURL)
 	if err != nil {
+		slog.Error("RSSフィードの取得・パースに失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("RSSフィードの取得・パースに失敗しました: %w", err)
 	}
 
 	urlsToScrape := make([]string, 0, len(rssFeed.Items))
-	// TitleはExtractorではなくRSSから取得するため、一時的なマップで保持
 	articleTitlesMap := make(map[string]string)
 
 	for _, item := range rssFeed.Items {
@@ -88,10 +106,14 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
 	}
 
-	fmt.Fprintf(os.Stderr, "🌐 記事URL %d件を最大並列数 %d で本文抽出中...\n", len(urlsToScrape), p.Parallel)
+	// ログ出力の修正: slog.Infoを使用し、構造化データとして情報を付加
+	slog.Info("記事URLの抽出を開始します",
+		slog.Int("urls", len(urlsToScrape)),
+		slog.Int("parallel", p.Parallel),
+		slog.String("feed_url", feedURL),
+	)
 
 	// --- 2. Scraperによる並列抽出の実行 ---
-	// Scraperに処理を委譲。
 	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
 
 	// --- 3. 抽出結果の確認とAI処理の分岐 ---
@@ -99,13 +121,24 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	for _, res := range results {
 		if res.Error == nil {
 			successCount++
-		} else if p.Verbose {
-			// 抽出エラーをVerboseモードでのみユーザーに出力
-			log.Printf("❌ 抽出エラー [%s]: %v", res.URL, res.Error)
+		} else {
+			// Verboseフラグに関わらず、エラーはWarnレベルで出力
+			// Verboseはログレベルで制御されるため、この条件分岐は不要
+			// ただし、今回はユーザーの意図を反映し、Verboseモードでのみエラー詳細を表示
+			if p.Verbose {
+				slog.Warn("抽出エラー",
+					slog.String("url", res.URL),
+					slog.String("error", res.Error.Error()),
+				)
+			}
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ 抽出完了。成功件数: %d / 処理件数: %d\n", successCount, len(urlsToScrape))
+	// ログ出力の修正: slog.Info
+	slog.Info("抽出完了",
+		slog.Int("success", successCount),
+		slog.Int("total", len(urlsToScrape)),
+	)
 
 	if successCount == 0 {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
@@ -117,22 +150,21 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// --- 4. AI処理の実行 (Cleanerによる Map-Reduce) ---
-	fmt.Fprintln(os.Stderr, "\n🤖 LLM処理開始 (Cleanerによる Map-Reduce)...")
+	// ログ出力の修正: slog.Info
+	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
-	// 4-1. コンテンツの結合 (成功した結果のみを結合)
+	// 4-1. コンテンツの結合
 	combinedTextForAI := cleaner.CombineContents(results)
 
 	// 4-2. クリーンアップと構造化の実行
-	// LLMAPIKeyをOverrideとしてCleanerに渡す
 	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.LLMAPIKey)
 	if err != nil {
-		// Cleanerから返されたエラーをラップして返す
+		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
 	}
 
 	// --- 5. AI処理結果の出力 ---
-	fmt.Fprintln(os.Stderr, "\n--- スクリプト生成完了 (AI構造化済み) ---")
-	// iohandler は stringではなく []byteを受け取るように修正されていることを前提とする
+	slog.Info("スクリプト生成完了", slog.String("mode", "AI構造化済み"))
 	return iohandler.WriteOutput("", []byte(structuredText))
 }
 
@@ -144,7 +176,10 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	for _, res := range results {
 		if res.Error != nil {
 			// AI処理スキップモードでも失敗したURLを通知
-			fmt.Fprintf(os.Stderr, "❌ 抽出失敗 [%s]: %v\n", res.URL, res.Error)
+			slog.Warn("抽出失敗",
+				slog.String("url", res.URL),
+				slog.String("mode", "AI処理スキップ"),
+			)
 			continue
 		}
 
@@ -161,8 +196,7 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 
 	combinedText := combinedTextBuilder.String()
 
-	fmt.Fprintln(os.Stderr, "\n--- スクリプト生成結果 (AI処理スキップ) ---")
+	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	// iohandler を使用して []byte で出力
 	return iohandler.WriteOutput("", []byte(combinedText))
 }
