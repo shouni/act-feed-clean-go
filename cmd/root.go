@@ -91,7 +91,6 @@ func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
 }
 
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
-// func newAppDependencies(httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
 func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
 
 	// 1. Extractorの初期化
@@ -157,8 +156,10 @@ func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config 
 
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
 func runCmdFunc(cmd *cobra.Command, args []string) error {
-	ctx := cmd.Context()
-	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+	// 既存のコンテキストを取得
+	parentCtx := cmd.Context()
+	// 既存のコンテキストから新しいタイムアウトコンテキストを派生させる
+	ctx, cancel := context.WithTimeout(parentCtx, contextTimeout)
 	defer cancel()
 
 	// ログの初期化をここで行う (DIコンポーネントの構築前に実行する必要がある)
