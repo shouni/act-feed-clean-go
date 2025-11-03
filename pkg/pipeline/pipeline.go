@@ -43,7 +43,7 @@ type Pipeline struct {
 	VoicevoxEngine *voicevox.Engine
 	OutputWAVPath  string // 音声合成後の出力ファイルパス
 
-	//  冗長な設定値フィールドを削除し、PipelineConfigへの参照を保持
+	// 設定値への参照を保持
 	config PipelineConfig // 設定値への参照を保持
 }
 
@@ -61,7 +61,7 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 			if a.Key == slog.TimeKey {
 				return slog.Attr{}
 			}
-			// グローバルな大文字変換を削除し、可読性を向上
+			// Timeキー以外の属性はそのまま返す
 			return a
 		},
 	})
@@ -121,7 +121,7 @@ func New(client *httpkit.Client, config PipelineConfig) (*Pipeline, error) {
 		VoicevoxEngine: vvEngine,
 		OutputWAVPath:  config.OutputWAVPath,
 
-		// 💡 修正2: config 構造体全体を保持
+		// 設定値全体を保持
 		config: config,
 	}, nil
 }
