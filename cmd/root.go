@@ -22,6 +22,7 @@ import (
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
 type RunFlags struct {
+	Verbose            bool
 	LLMAPIKey          string
 	FeedURL            string
 	Parallel           int
@@ -42,6 +43,24 @@ var Flags RunFlags
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
 func runCmdFunc(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
+
+	// slog の初期化
+	logLevel := slog.LevelInfo
+	if Flags.Verbose { // Flags.Verbose は PipelineConfig.Verbose に対応
+		logLevel = slog.LevelDebug
+	}
+
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	slog.SetDefault(slog.New(handler))
+	slog.Debug("slogを初期化しました", slog.String("level", logLevel.String()))
 
 	// APIキーのチェック（環境変数から取得を試みる）
 	if Flags.LLMAPIKey == "" {

@@ -110,7 +110,7 @@ func NewPipelineDependencies(client *httpkit.Client, config PipelineConfig) (*ex
 		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
 		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
-		defer cancel() // 修正: deferで確実にキャンセルを実行
+		defer cancel()
 
 		// voicevox.LoadSpeakers は voicevox.Engine が依存する speakerData を取得
 		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
