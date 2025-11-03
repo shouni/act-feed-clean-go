@@ -28,12 +28,12 @@ type Pipeline struct {
 	// 設定値
 	Parallel  int
 	Verbose   bool
-	LLMAPIKey string // 修正: LLM処理のためにAPIキーを保持
+	LLMAPIKey string // LLM処理のためにAPIキーを保持
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
 // LLMAPIKeyはcmd/root.goから渡されます。
-func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (*Pipeline, error) { // 修正: llmAPIKey引数を追加
+func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (*Pipeline, error) {
 
 	// 1. Extractorの初期化 (Scraperが依存)
 	extractor, err := extract.NewExtractor(client)
@@ -45,8 +45,7 @@ func New(client *httpkit.Client, parallel int, verbose bool, llmAPIKey string) (
 	parallelScraper := scraper.NewParallelScraper(extractor, parallel)
 
 	// 3. Cleanerの初期化 (AI処理ロジックをカプセル化)
-	// 修正: NewCleanerにデフォルトモデル名とverboseフラグを渡す
-	// NOTE: モデル名をCLIから設定するフラグがないため、デフォルト名を使用
+	// NewCleanerにデフォルトモデル名とverboseフラグを渡す
 	const defaultMapModel = cleaner.DefaultModelName
 	const defaultReduceModel = cleaner.DefaultModelName
 	llmCleaner, err := cleaner.NewCleaner(defaultMapModel, defaultReduceModel, verbose)
@@ -75,7 +74,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	urlsToScrape := make([]string, 0, len(rssFeed.Items))
-	// TitleはExtractorではなくRSSから取得するため、一時的なマップで保持 (types.URLResultがTitleを持たないため)
+	// TitleはExtractorではなくRSSから取得するため、一時的なマップで保持
 	articleTitlesMap := make(map[string]string)
 
 	for _, item := range rssFeed.Items {
@@ -92,7 +91,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	fmt.Fprintf(os.Stderr, "🌐 記事URL %d件を最大並列数 %d で本文抽出中...\n", len(urlsToScrape), p.Parallel)
 
 	// --- 2. Scraperによる並列抽出の実行 ---
-	// Scraperに処理を委譲。セマフォ制御やGoroutine管理はすべて scraper.ScrapeInParallel が担当。
+	// Scraperに処理を委譲。
 	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
 
 	// --- 3. 抽出結果の確認とAI処理の分岐 ---
@@ -101,6 +100,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		if res.Error == nil {
 			successCount++
 		} else if p.Verbose {
+			// 抽出エラーをVerboseモードでのみユーザーに出力
 			log.Printf("❌ 抽出エラー [%s]: %v", res.URL, res.Error)
 		}
 	}
@@ -119,17 +119,20 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	// --- 4. AI処理の実行 (Cleanerによる Map-Reduce) ---
 	fmt.Fprintln(os.Stderr, "\n🤖 LLM処理開始 (Cleanerによる Map-Reduce)...")
 
-	// 4-1. コンテンツの結合 (Cleanerのヘルパー関数を使用)
+	// 4-1. コンテンツの結合 (成功した結果のみを結合)
 	combinedTextForAI := cleaner.CombineContents(results)
 
 	// 4-2. クリーンアップと構造化の実行
+	// LLMAPIKeyをOverrideとしてCleanerに渡す
 	structuredText, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI, p.LLMAPIKey)
 	if err != nil {
+		// Cleanerから返されたエラーをラップして返す
 		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
 	}
 
 	// --- 5. AI処理結果の出力 ---
 	fmt.Fprintln(os.Stderr, "\n--- スクリプト生成完了 (AI構造化済み) ---")
+	// iohandler は stringではなく []byteを受け取るように修正されていることを前提とする
 	return iohandler.WriteOutput("", []byte(structuredText))
 }
 
@@ -140,6 +143,7 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 
 	for _, res := range results {
 		if res.Error != nil {
+			// AI処理スキップモードでも失敗したURLを通知
 			fmt.Fprintf(os.Stderr, "❌ 抽出失敗 [%s]: %v\n", res.URL, res.Error)
 			continue
 		}

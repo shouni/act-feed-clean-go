@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"unicode"
 
 	"act-feed-clean-go/pkg/types"
 
@@ -28,20 +29,17 @@ const MaxSegmentChars = 400000
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
 type Cleaner struct {
-	mapBuilder    *prompts.PromptBuilder
-	reduceBuilder *prompts.PromptBuilder
-	// 修正: LLMモデル名を保持するフィールドを追加
+	mapBuilder      *prompts.PromptBuilder
+	reduceBuilder   *prompts.PromptBuilder
 	MapModelName    string
 	ReduceModelName string
-	// 修正: 警告ログ制御のためのVerboseフラグを追加
-	Verbose bool
+	Verbose         bool
 }
 
 // DefaultModelName は Map/Reduce のデフォルトモデル名です。
 const DefaultModelName = "gemini-2.5-flash"
 
 // NewCleaner は新しいCleanerインスタンスを作成し、PromptBuilderを初期化します。
-// Map/Reduceで使用するLLMモデル名とVerboseフラグを受け取るように変更。
 func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 	if mapModel == "" {
 		mapModel = DefaultModelName
@@ -61,13 +59,11 @@ func NewCleaner(mapModel, reduceModel string, verbose bool) (*Cleaner, error) {
 	}
 
 	return &Cleaner{
-		mapBuilder:    mapBuilder,
-		reduceBuilder: reduceBuilder,
-		// 修正: モデル名をセット
+		mapBuilder:      mapBuilder,
+		reduceBuilder:   reduceBuilder,
 		MapModelName:    mapModel,
 		ReduceModelName: reduceModel,
-		// 修正: Verboseフラグをセット
-		Verbose: verbose,
+		Verbose:         verbose,
 	}, nil
 }
 
@@ -104,7 +100,7 @@ func CombineContents(results []types.URLResult) string {
 // CleanAndStructureText は、コンテンツをMap-Reduceパターンで構造化します。
 func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string, apiKeyOverride string) (string, error) {
 
-	// 1. LLMクライアントの初期化
+	// 1. LLMクライアントの初期化 (省略)
 	var client *gemini.Client
 	var err error
 
@@ -119,7 +115,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	}
 
 	// 2. Mapフェーズのためのテキスト分割
-	segments := c.segmentText(combinedText, MaxSegmentChars) // c.segmentTextに変更
+	segments := c.segmentText(combinedText, MaxSegmentChars)
 	log.Printf("テキストを %d 個のセグメントに分割しました。中間要約を開始します。", len(segments))
 
 	// 3. Mapフェーズの実行（各セグメントの並列処理）
@@ -131,7 +127,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 	// 4. Reduceフェーズの準備：中間要約の結合
 	finalCombinedText := strings.Join(intermediateSummaries, "\n\n--- INTERMEDIATE SUMMARY END ---\n\n")
 
-	// 5. Reduceフェーズ：最終的な統合と構造化のためのLLM呼び出し
+	// 5. Reduceフェーズ：最終的な統合と構造化のためのLLM呼び出し (省略)
 	log.Println("中間要約の結合が完了しました。最終的な構造化（Reduceフェーズ）を開始します。")
 
 	reduceData := prompts.ReduceTemplateData{CombinedText: finalCombinedText}
@@ -140,7 +136,6 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 		return "", fmt.Errorf("最終 Reduce プロンプトの生成に失敗しました: %w", err)
 	}
 
-	// 修正: ReduceLLMModelを使用
 	finalResponse, err := client.GenerateContent(ctx, finalPrompt, c.ReduceModelName)
 	if err != nil {
 		return "", fmt.Errorf("LLM最終構造化処理（Reduceフェーズ）に失敗しました: %w", err)
@@ -154,7 +149,6 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 // ----------------------------------------------------------------
 
 // segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
-// Cleanerのメソッドに修正。
 func (c *Cleaner) segmentText(text string, maxChars int) []string {
 	var segments []string
 	current := []rune(text)
@@ -165,7 +159,6 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 			break
 		}
 
-		// 修正: runesで操作するため、maxChars分のruneスライスを取得
 		segmentCandidateRunes := current[:maxChars]
 		segmentCandidate := string(segmentCandidateRunes)
 
@@ -174,9 +167,7 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 
 		// 1. ContentSeparator (最高優先度) を探す
 		if lastSepIdx := strings.LastIndex(segmentCandidate, ContentSeparator); lastSepIdx != -1 {
-			// 区切り文字の直後までを分割位置とする
 			potentialSplitIndex := lastSepIdx + len(ContentSeparator)
-			// 修正: maxCharsを超えない場合のみ採用
 			if potentialSplitIndex <= maxChars {
 				splitIndex = potentialSplitIndex
 				separatorFound = true
@@ -186,9 +177,7 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 		// 2. ContentSeparator が見つからない、または採用されなかった場合、一般的な改行(\n\n)を探す
 		if !separatorFound {
 			if lastSepIdx := strings.LastIndex(segmentCandidate, DefaultSeparator); lastSepIdx != -1 {
-				// 同様にmaxCharsを超えないように調整
 				potentialSplitIndex := lastSepIdx + len(DefaultSeparator)
-				// 修正: maxCharsを超えない場合のみ採用
 				if potentialSplitIndex <= maxChars {
 					splitIndex = potentialSplitIndex
 					separatorFound = true
@@ -196,8 +185,37 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 			}
 		}
 
+		// 3. 意味的な区切り文字（句読点、スペース）を探し、より自然な場所で分割
 		if !separatorFound {
-			// 修正: Verboseフラグに基づき警告を表示
+			// maxCharsの直前から開始し、最初のスペースや句読点の直後を探す
+			// 検索範囲をmaxCharsの直前50文字程度に制限して効率化を図る
+			const lookback = 50
+			start := max(0, len(segmentCandidateRunes)-lookback)
+
+			// 最後に意味的な区切りが見つかった位置
+			lastMeaningfulBreak := -1
+
+			// ルーン単位で逆方向にスキャン
+			for i := len(segmentCandidateRunes) - 1; i >= start; i-- {
+				r := segmentCandidateRunes[i]
+
+				// 句読点、スペース、全角スペースなど、文脈が途切れる可能性がある文字を探す
+				if unicode.IsPunct(r) || unicode.IsSpace(r) {
+					// 区切り文字の直後を分割点とする
+					lastMeaningfulBreak = i + 1
+					break
+				}
+			}
+
+			if lastMeaningfulBreak != -1 {
+				// 意味的な区切りが見つかった場合、その位置を採用
+				splitIndex = lastMeaningfulBreak
+				separatorFound = true
+			}
+		}
+
+		if !separatorFound {
+			// 最終手段: 安全な区切りが見つからない場合は、そのまま最大文字数で切り、警告を出す
 			if c.Verbose {
 				log.Printf("⚠️ WARNING: 分割点で適切な区切りが見つかりませんでした。強制的に %d 文字で分割します。", maxChars)
 			}
@@ -209,6 +227,14 @@ func (c *Cleaner) segmentText(text string, maxChars int) []string {
 	}
 
 	return segments
+}
+
+// max は2つの整数のうち大きい方を返すヘルパー関数 (Go 1.20未満の互換性のため)
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // processSegmentsInParallel は Mapフェーズを並列処理します。
@@ -228,7 +254,6 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 			mapData := prompts.MapTemplateData{SegmentText: seg}
 			prompt, err := c.mapBuilder.BuildMap(mapData)
 			if err != nil {
-				log.Printf("❌ ERROR: セグメント %d のプロンプト生成に失敗しました: %v", index+1, err)
 				resultsChan <- struct {
 					summary string
 					err     error
@@ -236,11 +261,9 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 				return
 			}
 
-			// 修正: MapModelNameを使用
 			response, err := client.GenerateContent(ctx, prompt, c.MapModelName)
 
 			if err != nil {
-				log.Printf("❌ ERROR: セグメント %d の処理に失敗しました: %v", index+1, err)
 				resultsChan <- struct {
 					summary string
 					err     error
@@ -259,12 +282,30 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 	close(resultsChan)
 
 	var summaries []string
+	// エラー報告のために、すべての結果を集める必要があるため、一旦スライスにコピー
+	allResults := make([]struct {
+		summary string
+		err     error
+	}, 0, len(segments))
 	for res := range resultsChan {
+		allResults = append(allResults, res)
+	}
+
+	// エラーチェックと集約
+	var firstError error
+	for _, res := range allResults {
 		if res.err != nil {
-			// 1つでもエラーがあれば、処理全体を失敗させる
-			return nil, res.err
+			if firstError == nil {
+				firstError = res.err
+			}
+		} else {
+			summaries = append(summaries, res.summary)
 		}
-		summaries = append(summaries, res.summary)
+	}
+
+	if firstError != nil {
+		// 少なくとも1つのエラーがあれば、処理全体を失敗させる
+		return nil, firstError
 	}
 
 	return summaries, nil
