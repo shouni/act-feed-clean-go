@@ -36,7 +36,7 @@ type Pipeline struct {
 	Extractor      *extract.Extractor
 	Scraper        scraper.Scraper
 	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine *voicevox.Engine
+	VoicevoxEngine voicevox.EngineExecutor
 
 	// 設定値 (Private)
 	config PipelineConfig
@@ -51,7 +51,7 @@ func New(
 	extractor *extract.Extractor,
 	scraperInstance scraper.Scraper,
 	cleanerInstance *cleaner.Cleaner,
-	vvEngine *voicevox.Engine,
+	vvEngine voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{

@@ -124,7 +124,7 @@ func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConf
 		slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
 		return nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
 	}
-	slog.Info("VOICEVOXスタイルデータのロード完了。")
+	slog.Info("VOICEVOX話者データとスタイルデータのロードが完了しました。") // より包括的なメッセージ
 
 	parser := voicevox.NewTextParser()
 	engineConfig := voicevox.EngineConfig{
