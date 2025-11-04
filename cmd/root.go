@@ -1,27 +1,26 @@
 package cmd
 
 import (
-	"act-feed-clean-go/pkg/scraper"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	"act-feed-clean-go/pkg/cleaner"
+	"act-feed-clean-go/pkg/pipeline"
+	"act-feed-clean-go/pkg/scraper"
+
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
+	"github.com/shouni/go-http-kit/pkg/httpkit"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 	"github.com/spf13/cobra"
-
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/pipeline"
-
-	"github.com/shouni/go-http-kit/pkg/httpkit"
 )
 
 // ----------------------------------------------------------------------
-// 構造体とフラグ
+// 構造体と定数
 // ----------------------------------------------------------------------
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
@@ -44,19 +43,25 @@ var Flags RunFlags
 const (
 	maxRetries = 3
 	// contextTimeout は、パイプライン全体の実行に許容される最大時間です。
-	// LLM呼び出しの増加と、より複雑な処理ステップに対応するため、20分に延長されました。
-	contextTimeout        = 20 * time.Minute
-	maxParallelSegments   = voicevox.DefaultMaxParallelSegments
-	defaultSegmentTimeout = voicevox.DefaultSegmentTimeout
+	contextTimeout = 20 * time.Minute
 )
 
+// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
+type appDependencies struct {
+	Extractor      *extract.Extractor
+	Scraper        scraper.Scraper
+	Cleaner        *cleaner.Cleaner
+	VoicevoxEngine *voicevox.Engine
+	HTTPClient     *httpkit.Client
+	PipelineConfig pipeline.PipelineConfig
+}
+
 // ----------------------------------------------------------------------
-// Cobra コマンド定義
+// ヘルパー関数 (ロギング、正規化、初期化)
 // ----------------------------------------------------------------------
 
 // initLogger はアプリケーションのデフォルトロガーを設定します。
 func initLogger() {
-	// ... (initLogger関数は変更なし)
 	logLevel := slog.LevelInfo
 	if clibase.Flags.Verbose {
 		logLevel = slog.LevelDebug
@@ -75,12 +80,14 @@ func initLogger() {
 	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
 }
 
-// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
-type appDependencies struct {
-	Extractor      *extract.Extractor
-	Scraper        scraper.Scraper
-	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine *voicevox.Engine
+// normalizeFlags は、フラグと環境変数から最終的な設定を決定します。
+func normalizeFlags(f *RunFlags) {
+	if f.LLMAPIKey == "" {
+		f.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
+	}
+	if f.VoicevoxAPIURL == "" {
+		f.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
+	}
 }
 
 func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
@@ -90,136 +97,152 @@ func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
 	return gemini.NewClientFromEnv(ctx)
 }
 
-// newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
-func newAppDependencies(ctx context.Context, httpClient *httpkit.Client, config pipeline.PipelineConfig) (*appDependencies, error) {
+// createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
+func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
+	clientOptions := []httpkit.ClientOption{
+		httpkit.WithMaxRetries(maxRetries),
+	}
+	return httpkit.New(scrapeTimeout, clientOptions...)
+}
 
-	// 1. Extractorの初期化
+// initializeVoicevoxEngine は VOICEVOX Engineの初期化を独立させます。
+func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConfig) (*voicevox.Engine, error) {
+	if config.VoicevoxAPIURL == "" {
+		return nil, nil // VOICEVOXを使用しない
+	}
+
+	slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
+
+	vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
+
+	// 修正済み: ロード処理のコンテキストを親コンテキスト (ctx) から派生させる
+	loadCtx, cancel := context.WithTimeout(ctx, config.VoicevoxAPITimeout)
+	defer cancel()
+
+	speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
+	if loadErr != nil {
+		slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
+		return nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
+	}
+	slog.Info("VOICEVOX話者データとスタイルデータのロードが完了しました。") // より包括的なメッセージ
+
+	parser := voicevox.NewTextParser()
+	engineConfig := voicevox.EngineConfig{
+		MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
+		SegmentTimeout:      voicevox.DefaultSegmentTimeout,
+	}
+
+	return voicevox.NewEngine(vvClient, speakerData, parser, engineConfig), nil
+}
+
+// ----------------------------------------------------------------------
+// 依存関係構築
+// ----------------------------------------------------------------------
+
+// newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
+func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
+
+	// 1. HTTPクライアントの初期化 (ヘルパー関数を使用)
+	httpClient := createHTTPClient(f.ScrapeTimeout)
+	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.ScrapeTimeout))
+
+	// PipelineConfig 構造体を組み立て
+	config := pipeline.PipelineConfig{
+		Verbose:            clibase.Flags.Verbose,
+		Parallel:           f.Parallel,
+		LLMAPIKey:          f.LLMAPIKey,
+		VoicevoxAPIURL:     f.VoicevoxAPIURL,
+		OutputWAVPath:      f.OutputWAVPath,
+		ScrapeTimeout:      f.ScrapeTimeout,
+		VoicevoxAPITimeout: f.VoicevoxAPITimeout,
+	}
+
+	// 2. Extractorの初期化
 	extractor, err := extract.NewExtractor(httpClient)
 	if err != nil {
 		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
 	}
 
-	// 2. Scraperの初期化
+	// 3. Scraperの初期化
 	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
 
-	// 3. Cleanerの初期化
-	var client *gemini.Client
-	client, err = initLLMClient(ctx, config.LLMAPIKey)
+	// 4. LLM Client & Cleanerの初期化
+	client, err := initLLMClient(ctx, config.LLMAPIKey)
 	if err != nil {
 		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
 	}
 
-	// 2. クリーナーの初期化
-	// CleanerConfig 構造体を構築
 	cleanerConfig := cleaner.CleanerConfig{
-		MapModel:     Flags.MapModelName,
-		ReduceModel:  Flags.ReduceModelName,
-		SummaryModel: Flags.SummaryModelName,
-		ScriptModel:  Flags.ScriptModelName,
+		MapModel:     f.MapModelName,
+		ReduceModel:  f.ReduceModelName,
+		SummaryModel: f.SummaryModelName,
+		ScriptModel:  f.ScriptModelName,
 		Verbose:      config.Verbose,
 	}
 
-	// 新しいシグネチャで NewCleaner を呼び出す
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
 		cleanerConfig,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
+	}
 
-	// 4. VOICEVOX Engineの初期化
-	var vvEngine *voicevox.Engine
-	if config.VoicevoxAPIURL != "" {
-		slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
-
-		vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
-
-		loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
-		defer cancel()
-
-		speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
-		if loadErr != nil {
-			slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
-			return nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
-		}
-
-		parser := voicevox.NewTextParser()
-		engineConfig := voicevox.EngineConfig{
-			MaxParallelSegments: maxParallelSegments,
-			SegmentTimeout:      defaultSegmentTimeout,
-		}
-
-		vvEngine = voicevox.NewEngine(vvClient, speakerData, parser, engineConfig)
+	// 5. VOICEVOX Engineの初期化 (ヘルパー関数を使用)
+	vvEngine, err := initializeVoicevoxEngine(ctx, &config)
+	if err != nil {
+		return nil, err
 	}
 
 	return &appDependencies{
+		HTTPClient:     httpClient,
 		Extractor:      extractor,
 		Scraper:        scraperInstance,
 		Cleaner:        cleanerInstance,
 		VoicevoxEngine: vvEngine,
+		PipelineConfig: config,
 	}, nil
 }
 
+// ----------------------------------------------------------------------
+// Cobra コマンド実行関数
+// ----------------------------------------------------------------------
+
 // runCmdFunc は 'run' サブコマンドが呼び出されたときに実行される関数です。
 func runCmdFunc(cmd *cobra.Command, args []string) error {
-	// 既存のコンテキストを取得
 	parentCtx := cmd.Context()
-	// 既存のコンテキストから新しいタイムアウトコンテキストを派生させる
 	ctx, cancel := context.WithTimeout(parentCtx, contextTimeout)
 	defer cancel()
 
-	// ログの初期化をここで行う (DIコンポーネントの構築前に実行する必要がある)
 	initLogger()
 
-	// APIキーのチェック（環境変数から取得を試みる）
-	if Flags.LLMAPIKey == "" {
-		Flags.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
-	}
+	normalizeFlags(&Flags)
 
-	// VOICEVOX API URLのチェック（環境変数から取得を試みる）
-	if Flags.VoicevoxAPIURL == "" {
-		Flags.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
-	}
-
-	// 1. HTTPクライアントの初期化
-	clientOptions := []httpkit.ClientOption{
-		httpkit.WithMaxRetries(maxRetries),
-	}
-	// ScrapeTimeoutをベースタイムアウトとして使用
-	httpClient := httpkit.New(Flags.ScrapeTimeout, clientOptions...)
-	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", Flags.ScrapeTimeout))
-
-	// PipelineConfig 構造体を組み立て
-	config := pipeline.PipelineConfig{
-		Verbose:            clibase.Flags.Verbose,
-		Parallel:           Flags.Parallel,
-		LLMAPIKey:          Flags.LLMAPIKey,
-		VoicevoxAPIURL:     Flags.VoicevoxAPIURL,
-		OutputWAVPath:      Flags.OutputWAVPath,
-		ScrapeTimeout:      Flags.ScrapeTimeout,
-		VoicevoxAPITimeout: Flags.VoicevoxAPITimeout,
-	}
-
-	// 2. 依存関係の構築（ヘルパー関数に委譲）
-	deps, err := newAppDependencies(ctx, httpClient, config)
+	// 1. 依存関係の構築（ヘルパー関数に委譲）
+	deps, err := newAppDependencies(ctx, Flags)
 	if err != nil {
-		// エラーは newAppDependencies 内でログ出力されているため、シンプルにエラーを返す
 		return err
 	}
 
-	// 3. Pipelineインスタンスを生成（依存関係を注入）
+	// 2. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
-		httpClient,
+		deps.HTTPClient,
 		deps.Extractor,
 		deps.Scraper,
 		deps.Cleaner,
 		deps.VoicevoxEngine,
-		config,
+		deps.PipelineConfig,
 	)
 
-	// 4. Pipelineの実行
+	// 3. Pipelineの実行
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
 }
+
+// ----------------------------------------------------------------------
+// Cobra コマンド定義 (フラグ、Execute)
+// ----------------------------------------------------------------------
 
 // addRunFlags は 'run' コマンドに固有のフラグを設定します。
 func addRunFlags(runCmd *cobra.Command) {
@@ -238,7 +261,6 @@ func addRunFlags(runCmd *cobra.Command) {
 	runCmd.Flags().StringVarP(&Flags.OutputWAVPath,
 		"output-wav-path", "v", "asset/audio_output.wav", "音声合成されたWAVファイルの出力パス。")
 
-	// AIモデル名オプションの追加
 	runCmd.Flags().StringVar(&Flags.MapModelName,
 		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ReduceModelName,

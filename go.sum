@@ -89,10 +89,10 @@ github.com/shouni/go-ai-client/v2 v2.0.2 h1:9fej/MkJPAWv1M8Ljdbu2hmEkhFix9rpnQtM
 github.com/shouni/go-ai-client/v2 v2.0.2/go.mod h1:/qv/8cVRGaEBVJaRpe77wgHDwr80swJ6FumSHHoMJPI=
 github.com/shouni/go-cli-base v1.0.5 h1:Wn09yji6/DIesFwo81/xlzWaJMqZVG07gXoRxMIre4c=
 github.com/shouni/go-cli-base v1.0.5/go.mod h1:8E4ahg7/LC3cG5zSBR4u/s+ugqrXxEsqXVWGbFlE1P8=
-github.com/shouni/go-http-kit v1.0.3 h1:+ksTASxEXWsAGt5ZMtdHQre5KePmrNi01P3gUuBlPCw=
-github.com/shouni/go-http-kit v1.0.3/go.mod h1:ht5tew+VUo/vBnOoNuQIXHGs3+0NCXhx7fLfEw0FEwc=
-github.com/shouni/go-utils v1.0.6 h1:MOG8nifNi/qA71trrhg+9bH4bP31pfKfRwcZ4X8iAQk=
-github.com/shouni/go-utils v1.0.6/go.mod h1:dQxOuVTvWFHWEH/G6izteLh+tubkI5Sl1jpDWlCSkBU=
+github.com/shouni/go-http-kit v1.0.4 h1:p3lIp5al/J9eRK4o3AepFCMSBRUyE4iknzdRZfoysb4=
+github.com/shouni/go-http-kit v1.0.4/go.mod h1:h1eYNiPy/Tif0kv+VZT6XdGaLxenj7Lcuy9EX7OE7c0=
+github.com/shouni/go-utils v1.0.7 h1:tLDVile32/z/Ez9pKWpdYMYYW4hu0ZhIOIUhqmPi8J0=
+github.com/shouni/go-utils v1.0.7/go.mod h1:dQxOuVTvWFHWEH/G6izteLh+tubkI5Sl1jpDWlCSkBU=
 github.com/shouni/go-voicevox v1.0.9 h1:9QZQ1I+wCu5PVpL4UZzemm+59Fxo+NC6r5eAgz33cY4=
 github.com/shouni/go-voicevox v1.0.9/go.mod h1:1sC+vPSpQLQk7gQIbL3crbs3v8XVJTQa8EHxf3U0/h0=
 github.com/shouni/go-web-exact/v2 v2.0.5 h1:H9xU1wZJtdYAXUe4nNavjK5neqTYF4OifjH7cCUxAms=

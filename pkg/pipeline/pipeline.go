@@ -36,7 +36,7 @@ type Pipeline struct {
 	Extractor      *extract.Extractor
 	Scraper        scraper.Scraper
 	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine *voicevox.Engine
+	VoicevoxEngine voicevox.EngineExecutor
 
 	// 設定値 (Private)
 	config PipelineConfig
@@ -51,11 +51,9 @@ func New(
 	extractor *extract.Extractor,
 	scraperInstance scraper.Scraper,
 	cleanerInstance *cleaner.Cleaner,
-	vvEngine *voicevox.Engine,
+	vvEngine voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
-	// New 関数からログ初期化ロジックは削除されました
-
 	return &Pipeline{
 		Client:    client,
 		Extractor: extractor,
@@ -125,63 +123,85 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	//  LLMAPIKeyがない場合はAI処理をスキップし、抽出結果をテキストで出力 (p.config.LLMAPIKeyにアクセス)
+	// LLMAPIKeyがない場合はAI処理をスキップ
 	if p.config.LLMAPIKey == "" {
 		slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
 		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
 	}
 
-	// --- 4. AI処理の実行 (Cleanerによる Map-Reduce) ---
+	// --- 4. AI処理の実行 (ヘルパーメソッドに委譲) ---
+	scriptText, err := p.processWithAI(ctx, rssFeed.Title, results)
+	if err != nil {
+		return err // エラーは processWithAI 内で詳細化されている
+	}
+
+	// --- 5. 出力分岐 ---
+	return p.handleOutput(ctx, scriptText)
+}
+
+// ----------------------------------------------------------------------
+// ヘルパー関数 (AI処理)
+// ----------------------------------------------------------------------
+
+// processWithAI は AI による Map-Reduce、Summary、Script Generation を実行します。
+func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results []types.URLResult) (string, error) {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
+	// Map-Reduce
 	combinedTextForAI := cleaner.CombineContents(results)
 	reduceResult, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI)
 	if err != nil {
 		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
+		return "", fmt.Errorf("AIによるコンテンツの構造化に失敗しました: %w", err)
 	}
 
-	// --- 4-A. Final Summary の実行 ---
+	// Final Summary
 	title := cleaner.ExtractTitleFromMarkdown(reduceResult)
 	if title == "" {
-		// フォールバックタイトルを一度だけ計算
-		fallbackTitle := rssFeed.Title
-		if len(rssFeed.Items) > 0 {
-			fallbackTitle = rssFeed.Items[0].Title
-		}
-		slog.Warn("AIによるタイトル抽出に失敗しました。フィードのタイトルを代替として使用します。", slog.String("fallback_title", fallbackTitle))
-		title = fallbackTitle
+		// 修正: 複雑なフォールバックロジックを削除し、フィードタイトルを代替として使用
+		slog.Warn("AIによるタイトル抽出に失敗しました。フィードのタイトルを代替として使用します。", slog.String("fallback_title", feedTitle))
+		title = feedTitle
 	}
 
 	finalSummary, err := p.Cleaner.GenerateFinalSummary(ctx, title, reduceResult)
 	if err != nil {
 		slog.Error("Final Summaryの生成に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("Final Summaryの生成に失敗しました: %w", err)
+		return "", fmt.Errorf("Final Summaryの生成に失敗しました: %w", err)
 	}
 
-	// --- 4-B. Script Generation の実行 ---
+	// Script Generation
 	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, title, finalSummary)
 	if err != nil {
 		slog.Error("VOICEVOXスクリプトの生成に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("VOICEVOXスクリプトの生成に失敗しました: %w", err)
+		return "", fmt.Errorf("VOICEVOXスクリプトの生成に失敗しました: %w", err)
 	}
 
-	// --- 5. AI処理結果の出力分岐 ---
+	return scriptText, nil
+}
+
+// ----------------------------------------------------------------------
+// ヘルパー関数 (I/O処理)
+// ----------------------------------------------------------------------
+
+// handleOutput は音声合成またはテキスト出力を実行します。
+func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
+	// 5-A. VOICEVOXによる音声合成とWAV出力
 	if p.VoicevoxEngine != nil && p.OutputWAVPath != "" {
-		// --- 5-A. VOICEVOXによる音声合成とWAV出力 ---
 		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.OutputWAVPath))
+
+		// VoicevoxEngine.Executeが voicevox.EngineExecutor インターフェースを満たすと仮定
 		err := p.VoicevoxEngine.Execute(ctx, scriptText, p.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
 		}
 		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.OutputWAVPath)
 
-		// 音声合成が成功したら、以降のテキスト出力処理をスキップしてここで終了
+		// 音声合成が成功したら、テキスト出力をスキップして終了
 		return nil
 	}
 
-	// AI処理が実行されたが音声合成が行われない場合、テキスト出力を実行
-	return iohandler.WriteOutput("", []byte(scriptText))
+	// 5-B. テキスト出力
+	return iohandler.WriteOutputString("", scriptText) // 修正: string を渡す
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理
@@ -211,11 +231,11 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 
 	combinedText := combinedTextBuilder.String()
 
-	// combinedTextが空の場合のチェックと警告ログの追加
 	if combinedText == "" {
 		slog.Warn("すべての記事本文が空でした。空の出力を生成します。", slog.String("mode", "AI処理スキップ"))
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	return iohandler.WriteOutput("", []byte(combinedText))
+	// 修正: iohandler.WriteOutput に string を渡す
+	return iohandler.WriteOutputString("", combinedText)
 }
