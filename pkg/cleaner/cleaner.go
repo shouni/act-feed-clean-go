@@ -48,7 +48,7 @@ const DefaultScriptModelName = DefaultModelName
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
 type Cleaner struct {
 	client *gemini.Client // LLMクライアントを注入
-	prompt PromptManager
+	prompt *PromptManager
 	config CleanerConfig
 }
 
@@ -123,7 +123,7 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 
 	return &Cleaner{
 		client: client, // 注入
-		prompt: *manager,
+		prompt: manager,
 		config: config,
 	}, nil
 }
