@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -20,10 +19,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ... (RunFlags, Flags, Consts, initLogger, normalizeFlags は変更なし)
-
-// グローバルなオプションインスタンス。
-var opts pipeline.GenerateOptions
+// ----------------------------------------------------------------------
+// 構造体と定数
+// ----------------------------------------------------------------------
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
 type RunFlags struct {
@@ -43,12 +41,26 @@ type RunFlags struct {
 var Flags RunFlags
 
 const (
-	maxRetries     = 3
+	maxRetries = 3
+	// contextTimeout は、パイプライン全体の実行に許容される最大時間です。
 	contextTimeout = 20 * time.Minute
 )
 
+// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
+type appDependencies struct {
+	Extractor      *extract.Extractor
+	Scraper        scraper.Scraper
+	Cleaner        *cleaner.Cleaner
+	VoicevoxEngine *voicevox.Engine
+	HTTPClient     *httpkit.Client
+	PipelineConfig pipeline.PipelineConfig
+}
+
+// ----------------------------------------------------------------------
+// ヘルパー関数 (ロギング、正規化、初期化)
+// ----------------------------------------------------------------------
+
 // initLogger はアプリケーションのデフォルトロガーを設定します。
-// ... (中略: initLogger, normalizeFlags, initLLMClient は変更なし) ...
 func initLogger() {
 	logLevel := slog.LevelInfo
 	if clibase.Flags.Verbose {
@@ -68,6 +80,7 @@ func initLogger() {
 	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
 }
 
+// normalizeFlags は、フラグと環境変数から最終的な設定を決定します。
 func normalizeFlags(f *RunFlags) {
 	if f.LLMAPIKey == "" {
 		f.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
@@ -84,12 +97,7 @@ func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
 	return gemini.NewClientFromEnv(ctx)
 }
 
-// ----------------------------------------------------------------------
-// 新しいヘルパー関数
-// ----------------------------------------------------------------------
-
 // createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
-// (行番号 120 相当の修正)
 func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
@@ -107,8 +115,7 @@ func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConf
 
 	vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
-	// 修正: ロード処理のコンテキストを親コンテキスト (ctx) から派生させる
-	// (行番号 109 相当の修正)
+	// 修正済み: ロード処理のコンテキストを親コンテキスト (ctx) から派生させる
 	loadCtx, cancel := context.WithTimeout(ctx, config.VoicevoxAPITimeout)
 	defer cancel()
 
@@ -131,16 +138,6 @@ func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConf
 // ----------------------------------------------------------------------
 // 依存関係構築
 // ----------------------------------------------------------------------
-
-// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
-type appDependencies struct {
-	Extractor      *extract.Extractor
-	Scraper        scraper.Scraper
-	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine *voicevox.Engine
-	HTTPClient     *httpkit.Client
-	PipelineConfig pipeline.PipelineConfig
-}
 
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
@@ -243,13 +240,9 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
 }
 
-// ... (addRunFlags, runCmd, Execute は変更なし) ...
-var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "RSSフィードの取得、並列抽出、AI構造化処理を実行します。",
-	Long:  "RSSフィードからURLを抽出し、記事本文を並列で取得後、LLMでクリーンアップ・構造化します。",
-	RunE:  runCmdFunc,
-}
+// ----------------------------------------------------------------------
+// Cobra コマンド定義 (フラグ、Execute)
+// ----------------------------------------------------------------------
 
 // addRunFlags は 'run' コマンドに固有のフラグを設定します。
 func addRunFlags(runCmd *cobra.Command) {
@@ -276,6 +269,13 @@ func addRunFlags(runCmd *cobra.Command) {
 		"summary-model", cleaner.DefaultSummaryModelName, "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
 	runCmd.Flags().StringVar(&Flags.ScriptModelName,
 		"script-model", cleaner.DefaultScriptModelName, "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
+}
+
+var runCmd = &cobra.Command{
+	Use:   "run",
+	Short: "RSSフィードの取得、並列抽出、AI構造化処理を実行します。",
+	Long:  "RSSフィードからURLを抽出し、記事本文を並列で取得後、LLMでクリーンアップ・構造化します。",
+	RunE:  runCmdFunc,
 }
 
 // Execute は、CLIアプリケーションのエントリポイントです。
