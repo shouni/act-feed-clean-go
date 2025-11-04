@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,12 +20,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ----------------------------------------------------------------------
-// 構造体と定数
-// ----------------------------------------------------------------------
+// ... (RunFlags, Flags, Consts, initLogger, normalizeFlags は変更なし)
+
+// グローバルなオプションインスタンス。
+var opts pipeline.GenerateOptions
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
-// NOTE: フラグはそのまま維持
 type RunFlags struct {
 	LLMAPIKey          string
 	FeedURL            string
@@ -46,21 +47,8 @@ const (
 	contextTimeout = 20 * time.Minute
 )
 
-// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
-type appDependencies struct {
-	Extractor      *extract.Extractor
-	Scraper        scraper.Scraper
-	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine *voicevox.Engine
-	HTTPClient     *httpkit.Client
-	PipelineConfig pipeline.PipelineConfig
-}
-
-// ----------------------------------------------------------------------
-// ヘルパー関数 (ロギング、正規化、クライアント初期化)
-// ----------------------------------------------------------------------
-
 // initLogger はアプリケーションのデフォルトロガーを設定します。
+// ... (中略: initLogger, normalizeFlags, initLLMClient は変更なし) ...
 func initLogger() {
 	logLevel := slog.LevelInfo
 	if clibase.Flags.Verbose {
@@ -80,8 +68,6 @@ func initLogger() {
 	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
 }
 
-// normalizeFlags は、フラグと環境変数から最終的な設定を決定します。
-// 修正: runCmdFuncのロジックをここに移動
 func normalizeFlags(f *RunFlags) {
 	if f.LLMAPIKey == "" {
 		f.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
@@ -98,6 +84,19 @@ func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
 	return gemini.NewClientFromEnv(ctx)
 }
 
+// ----------------------------------------------------------------------
+// 新しいヘルパー関数
+// ----------------------------------------------------------------------
+
+// createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
+// (行番号 120 相当の修正)
+func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
+	clientOptions := []httpkit.ClientOption{
+		httpkit.WithMaxRetries(maxRetries),
+	}
+	return httpkit.New(scrapeTimeout, clientOptions...)
+}
+
 // initializeVoicevoxEngine は VOICEVOX Engineの初期化を独立させます。
 func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConfig) (*voicevox.Engine, error) {
 	if config.VoicevoxAPIURL == "" {
@@ -108,8 +107,9 @@ func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConf
 
 	vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
 
-	// ロード処理のタイムアウトを適用
-	loadCtx, cancel := context.WithTimeout(context.Background(), config.VoicevoxAPITimeout)
+	// 修正: ロード処理のコンテキストを親コンテキスト (ctx) から派生させる
+	// (行番号 109 相当の修正)
+	loadCtx, cancel := context.WithTimeout(ctx, config.VoicevoxAPITimeout)
 	defer cancel()
 
 	speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
@@ -128,18 +128,28 @@ func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConf
 	return voicevox.NewEngine(vvClient, speakerData, parser, engineConfig), nil
 }
 
+// ----------------------------------------------------------------------
+// 依存関係構築
+// ----------------------------------------------------------------------
+
+// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
+type appDependencies struct {
+	Extractor      *extract.Extractor
+	Scraper        scraper.Scraper
+	Cleaner        *cleaner.Cleaner
+	VoicevoxEngine *voicevox.Engine
+	HTTPClient     *httpkit.Client
+	PipelineConfig pipeline.PipelineConfig
+}
+
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
-// 修正: HTTPClientの初期化ロジックを内部に持つように変更
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
 
-	// 1. HTTPクライアントの初期化 (ScrapeTimeoutをベースタイムアウトとして使用)
-	clientOptions := []httpkit.ClientOption{
-		httpkit.WithMaxRetries(maxRetries),
-	}
-	httpClient := httpkit.New(f.ScrapeTimeout, clientOptions...)
+	// 1. HTTPクライアントの初期化 (ヘルパー関数を使用)
+	httpClient := createHTTPClient(f.ScrapeTimeout)
 	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.ScrapeTimeout))
 
-	// PipelineConfig 構造体を組み立て (依存関係注入のために使用)
+	// PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
 		Verbose:            clibase.Flags.Verbose,
 		Parallel:           f.Parallel,
@@ -183,7 +193,7 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
 
-	// 5. VOICEVOX Engineの初期化
+	// 5. VOICEVOX Engineの初期化 (ヘルパー関数を使用)
 	vvEngine, err := initializeVoicevoxEngine(ctx, &config)
 	if err != nil {
 		return nil, err
@@ -210,6 +220,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	initLogger()
+
 	normalizeFlags(&Flags)
 
 	// 1. 依存関係の構築（ヘルパー関数に委譲）
@@ -232,10 +243,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	return pipelineInstance.Run(ctx, Flags.FeedURL)
 }
 
-// ----------------------------------------------------------------------
-// Cobra コマンド定義 (フラグ、Execute)
-// ----------------------------------------------------------------------
-
+// ... (addRunFlags, runCmd, Execute は変更なし) ...
 var runCmd = &cobra.Command{
 	Use:   "run",
 	Short: "RSSフィードの取得、並列抽出、AI構造化処理を実行します。",
