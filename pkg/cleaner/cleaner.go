@@ -47,7 +47,7 @@ const DefaultScriptModelName = DefaultModelName
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
 type Cleaner struct {
-	client *gemini.Client // 修正: LLMクライアントを注入
+	client *gemini.Client // LLMクライアントを注入
 	prompt PromptManager
 	config CleanerConfig
 }
@@ -116,7 +116,7 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 	}
 
 	// PromptManagerを構築
-	manager, err := NewPromptManager() // config引数はここでは不要（元のコードに従う）
+	manager, err := NewPromptManager()
 	if err != nil {
 		return nil, fmt.Errorf("PromptManagerの初期化に失敗しました: %w", err)
 	}
