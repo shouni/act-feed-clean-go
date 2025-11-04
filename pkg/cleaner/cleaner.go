@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"act-feed-clean-go/pkg/types"
-
 	"act-feed-clean-go/prompts"
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
@@ -48,12 +47,9 @@ const DefaultScriptModelName = DefaultModelName
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
 type Cleaner struct {
-	client              *gemini.Client // 修正: LLMクライアントを注入
-	mapBuilder          *prompts.PromptBuilder
-	reduceBuilder       *prompts.PromptBuilder
-	finalSummaryBuilder *prompts.PromptBuilder
-	scriptBuilder       *prompts.PromptBuilder
-	config              CleanerConfig
+	client *gemini.Client // LLMクライアントを注入
+	prompt *PromptManager
+	config CleanerConfig
 }
 
 type CleanerConfig struct {
@@ -62,6 +58,40 @@ type CleanerConfig struct {
 	SummaryModel string // FinalSummaryフェーズで使用するGeminiモデル名
 	ScriptModel  string // ScriptGenerationフェーズで使用するGeminiモデル名
 	Verbose      bool   // 詳細ログを有効にするか
+}
+
+type PromptManager struct {
+	MapBuilder          *prompts.PromptBuilder
+	ReduceBuilder       *prompts.PromptBuilder
+	FinalSummaryBuilder *prompts.PromptBuilder
+	ScriptBuilder       *prompts.PromptBuilder
+	// 必要に応じて、configも保持できますが、ここでは初期化時にモデル名を使用
+}
+
+func NewPromptManager() (*PromptManager, error) {
+	mapBuilder := prompts.NewMapPromptBuilder()
+	if err := mapBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Map プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+	reduceBuilder := prompts.NewReducePromptBuilder()
+	if err := reduceBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Reduce プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+	finalSummaryBuilder := prompts.NewFinalSummaryPromptBuilder()
+	if err := finalSummaryBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Final Summary プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+	scriptBuilder := prompts.NewScriptPromptBuilder()
+	if err := scriptBuilder.Err(); err != nil {
+		return nil, fmt.Errorf("Script プロンプトビルダーの初期化に失敗しました: %w", err)
+	}
+
+	return &PromptManager{
+		MapBuilder:          mapBuilder,
+		ReduceBuilder:       reduceBuilder,
+		FinalSummaryBuilder: finalSummaryBuilder,
+		ScriptBuilder:       scriptBuilder,
+	}, nil
 }
 
 // NewCleaner は新しいCleanerインスタンスを作成し、依存関係とPromptBuilderを初期化します。
@@ -85,34 +115,16 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 		config.ScriptModel = DefaultScriptModelName
 	}
 
-	mapBuilder := prompts.NewMapPromptBuilder()
-	if err := mapBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Map プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-	reduceBuilder := prompts.NewReducePromptBuilder()
-	if err := reduceBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Reduce プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-
-	// 新規追加
-	finalSummaryBuilder := prompts.NewFinalSummaryPromptBuilder()
-	if err := finalSummaryBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Final Summary プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-
-	// 新規追加
-	scriptBuilder := prompts.NewScriptPromptBuilder()
-	if err := scriptBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Script プロンプトビルダーの初期化に失敗しました: %w", err)
+	// PromptManagerを構築
+	manager, err := NewPromptManager()
+	if err != nil {
+		return nil, fmt.Errorf("PromptManagerの初期化に失敗しました: %w", err)
 	}
 
 	return &Cleaner{
-		client:              client, // 注入
-		mapBuilder:          mapBuilder,
-		reduceBuilder:       reduceBuilder,
-		finalSummaryBuilder: finalSummaryBuilder, // 新規追加
-		scriptBuilder:       scriptBuilder,       // 新規追加
-		config:              config,
+		client: client, // 注入
+		prompt: manager,
+		config: config,
 	}, nil
 }
 
@@ -173,7 +185,7 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 
 	// Reduce プロンプト（reduce_final_prompt.md）を使用して中間統合要約を作成
 	reduceData := prompts.ReduceTemplateData{CombinedText: intermediateCombinedText}
-	finalPrompt, err := c.reduceBuilder.BuildReduce(reduceData)
+	finalPrompt, err := c.prompt.ReduceBuilder.BuildReduce(reduceData)
 	if err != nil {
 		return "", fmt.Errorf("Reduce プロンプトの生成に失敗しました: %w", err)
 	}
@@ -198,7 +210,7 @@ func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, interm
 		Title:               title,
 		IntermediateSummary: intermediateSummary,
 	}
-	prompt, err := c.finalSummaryBuilder.BuildFinalSummary(summaryData)
+	prompt, err := c.prompt.FinalSummaryBuilder.BuildFinalSummary(summaryData)
 	if err != nil {
 		return "", fmt.Errorf("Final Summary プロンプトの生成に失敗しました: %w", err)
 	}
@@ -222,7 +234,7 @@ func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, f
 		Title:            title,
 		FinalSummaryText: finalSummary,
 	}
-	prompt, err := c.scriptBuilder.BuildScript(scriptData)
+	prompt, err := c.prompt.ScriptBuilder.BuildScript(scriptData)
 	if err != nil {
 		return "", fmt.Errorf("Script プロンプトの生成に失敗しました: %w", err)
 	}
@@ -376,7 +388,7 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.
 			defer wg.Done()
 
 			mapData := prompts.MapTemplateData{SegmentText: seg}
-			prompt, err := c.mapBuilder.BuildMap(mapData)
+			prompt, err := c.prompt.MapBuilder.BuildMap(mapData)
 			if err != nil {
 				resultsChan <- struct {
 					index   int
