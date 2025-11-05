@@ -174,14 +174,13 @@ func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results 
 // handleOutput は音声合成またはテキスト出力を実行します。
 func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 	// 5-A. VOICEVOXによる音声合成とWAV出力
-	if p.VoicevoxEngineExecutor != nil && p.OutputWAVPath != "" {
-		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.OutputWAVPath))
-		err := p.VoicevoxEngineExecutor.Execute(ctx, scriptText, p.OutputWAVPath)
+	if p.VoicevoxEngineExecutor != nil && p.config.OutputWAVPath != "" {
+		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.config.OutputWAVPath))
+		err := p.VoicevoxEngineExecutor.Execute(ctx, scriptText, p.config.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
 		}
-		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.OutputWAVPath)
-
+		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.config.OutputWAVPath)
 		return nil
 	}
 
