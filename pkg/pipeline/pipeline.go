@@ -42,7 +42,6 @@ type ScraperExecutor interface {
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
 	// 依存関係 (Public fields)
-	// ★ 修正: 依存関係をインターフェース型に変更
 	FeedParser             FeedParser
 	Extractor              *extract.Extractor
 	Scraper                ScraperExecutor
@@ -58,17 +57,17 @@ type Pipeline struct {
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
 func New(
-	feedParser FeedParser, // ★ 修正: インターフェース型を使用
+	feedParser FeedParser,
 	extractor *extract.Extractor,
-	scraperInstance ScraperExecutor, // ★ 修正: ScraperExecutor インターフェース型を使用
+	scraperInstance ScraperExecutor,
 	cleanerInstance *cleaner.Cleaner,
 	VoicevoxEngineExecutor voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
-		FeedParser: feedParser, // ★ 修正: インターフェース型として代入
+		FeedParser: feedParser,
 		Extractor:  extractor,
-		Scraper:    scraperInstance, // ★ 修正: インターフェース型として代入
+		Scraper:    scraperInstance,
 		Cleaner:    cleanerInstance,
 
 		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
@@ -96,7 +95,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	for _, item := range parsedItems {
 		if item.Link != "" && item.Title != "" {
 			urlsToScrape = append(urlsToScrape, item.Link)
-			articleTitlesMap[item.Link] = item.Title // タイトルマップに格納
+			articleTitlesMap[item.Link] = item.Title
 		}
 	}
 	if len(urlsToScrape) == 0 {
