@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"act-feed-clean-go/pkg/types"
+
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
@@ -66,7 +67,7 @@ func (s *ParallelScraper) ScrapeInParallel(ctx context.Context, urls []string) [
 			default:
 			}
 
-			content, hasBodyFound, err := s.extractor.FetchAndExtractText(u, ctx)
+			content, hasBodyFound, err := s.extractor.FetchAndExtractText(ctx, u)
 
 			var extractErr error
 			if err != nil {

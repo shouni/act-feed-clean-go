@@ -77,7 +77,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 	// 2. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
-		deps.HTTPClient,
+		deps.FeedParser,
 		deps.Extractor,
 		deps.Scraper,
 		deps.Cleaner,
@@ -101,7 +101,7 @@ func addRunFlags(runCmd *cobra.Command) {
 	runCmd.Flags().IntVarP(&Flags.Parallel,
 		"parallel", "p", 10, "Webスクレイピングの最大同時並列リクエスト数")
 	runCmd.Flags().DurationVarP(&Flags.HttpTimeout,
-		"http-timeout", "s", 30*time.Second, "HTTPタイムアウト時間")
+		"http-timeout", "t", 30*time.Second, "HTTPタイムアウト時間")
 	runCmd.Flags().StringVarP(&Flags.OutputWAVPath,
 		"output-wav-path", "v", "asset/audio_output.wav", "音声合成されたWAVファイルの出力パス。")
 	runCmd.Flags().StringVar(&Flags.CleanerConfig.MapModel,
