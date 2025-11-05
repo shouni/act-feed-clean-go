@@ -2,20 +2,14 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
 	"act-feed-clean-go/pkg/cleaner"
 	"act-feed-clean-go/pkg/pipeline"
-	"act-feed-clean-go/pkg/scraper"
 
-	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
-	"github.com/shouni/go-http-kit/pkg/httpkit"
-	"github.com/shouni/go-voicevox/pkg/voicevox"
-	"github.com/shouni/go-web-exact/v2/pkg/extract"
 	"github.com/spf13/cobra"
 )
 
@@ -35,23 +29,12 @@ type RunFlags struct {
 var Flags RunFlags
 
 const (
-	maxRetries = 3
 	// contextTimeout は、パイプライン全体の実行に許容される最大時間です。
 	contextTimeout = 20 * time.Minute
 )
 
-// appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
-type appDependencies struct {
-	Extractor              *extract.Extractor
-	Scraper                scraper.Scraper
-	Cleaner                *cleaner.Cleaner
-	VoicevoxEngineExecutor voicevox.EngineExecutor
-	HTTPClient             *httpkit.Client
-	PipelineConfig         pipeline.PipelineConfig
-}
-
 // ----------------------------------------------------------------------
-// ヘルパー関数 (ロギング、正規化、初期化)
+// ヘルパー関数 (ロギング、正規化、初期化) (initLogger を保持)
 // ----------------------------------------------------------------------
 
 // initLogger はアプリケーションのデフォルトロガーを設定します。
@@ -74,73 +57,6 @@ func initLogger() {
 	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
 }
 
-// createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
-func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
-	clientOptions := []httpkit.ClientOption{
-		httpkit.WithMaxRetries(maxRetries),
-	}
-	return httpkit.New(scrapeTimeout, clientOptions...)
-}
-
-// ----------------------------------------------------------------------
-// 依存関係構築
-// ----------------------------------------------------------------------
-
-// newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
-func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
-
-	// 1. HTTPクライアントの初期化 (ヘルパー関数を使用)
-	httpClient := createHTTPClient(f.HttpTimeout)
-	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.HttpTimeout))
-
-	// PipelineConfig 構造体を組み立て
-	config := pipeline.PipelineConfig{
-		Verbose:       clibase.Flags.Verbose,
-		Parallel:      f.Parallel,
-		OutputWAVPath: f.OutputWAVPath,
-	}
-
-	// 2. Extractorの初期化
-	extractor, err := extract.NewExtractor(httpClient)
-	if err != nil {
-		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
-		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
-	}
-
-	// 3. Scraperの初期化
-	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
-
-	// 4. geminiの初期化
-	client, err := gemini.NewClientFromEnv(ctx)
-	if err != nil {
-		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
-		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
-	}
-
-	cleanerInstance, err := cleaner.NewCleaner(
-		client,
-		Flags.CleanerConfig,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
-	}
-
-	// 5. VOICEVOX Engineの初期化
-	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, Flags.HttpTimeout, config.OutputWAVPath != "")
-	if err != nil {
-		return nil, err
-	}
-
-	return &appDependencies{
-		HTTPClient:             httpClient,
-		Extractor:              extractor,
-		Scraper:                scraperInstance,
-		Cleaner:                cleanerInstance,
-		VoicevoxEngineExecutor: voicevoxExecutor,
-		PipelineConfig:         config,
-	}, nil
-}
-
 // ----------------------------------------------------------------------
 // Cobra コマンド実行関数
 // ----------------------------------------------------------------------
@@ -153,7 +69,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 	initLogger()
 
-	// 1. 依存関係の構築（ヘルパー関数に委譲）
+	// 1. 依存関係の構築（generate.go にあるヘルパー関数に委譲）
 	deps, err := newAppDependencies(ctx, Flags)
 	if err != nil {
 		return err
@@ -179,6 +95,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 // addRunFlags は 'run' コマンドに固有のフラグを設定します。
 func addRunFlags(runCmd *cobra.Command) {
+	// 注: CleanerConfigのフラグ名は、以前の修正で確認した正しいフィールド名を使用
 	runCmd.Flags().StringVarP(&Flags.FeedURL,
 		"feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
 	runCmd.Flags().IntVarP(&Flags.Parallel,
