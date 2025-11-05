@@ -142,7 +142,12 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// LLMが利用不可の場合 (AI処理スキップ)
 	slog.Info("AI処理コンポーネントが未設定のため、抽出結果を結合して出力します。", slog.String("mode", "AIスキップ"))
-	return p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
+	combinedScriptText, err := p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
+	if err != nil {
+		return err
+	}
+	// 5. 出力分岐 (AI処理スキップ結果の出力)
+	return p.handleOutput(ctx, combinedScriptText)
 }
 
 // ----------------------------------------------------------------------
@@ -207,29 +212,19 @@ func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理
-func (p *Pipeline) processWithoutAI(feedTitle string, successfulResults []types.URLResult, titlesMap map[string]string) error {
+func (p *Pipeline) processWithoutAI(feedTitle string, successfulResults []types.URLResult, titlesMap map[string]string) (string, error) {
 	var combinedTextBuilder strings.Builder
 	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
 
 	for _, res := range successfulResults {
-
 		articleTitle := titlesMap[res.URL]
 		if articleTitle == "" {
-			articleTitle = res.URL
+			slog.Warn("記事タイトルが見つかりませんでした。URLを使用します。", slog.String("url", res.URL))
+			articleTitle = res.URL // または "不明なタイトル" など、適切なフォールバック
 		}
-
-		// 記事タイトルと本文を結合
-		combinedTextBuilder.WriteString(fmt.Sprintf("## 【記事タイトル】 %s\n\n", articleTitle))
+		combinedTextBuilder.WriteString(fmt.Sprintf("## %s\n\n", articleTitle))
 		combinedTextBuilder.WriteString(res.Content)
 		combinedTextBuilder.WriteString("\n\n---\n\n")
 	}
-
-	combinedText := combinedTextBuilder.String()
-
-	if combinedText == "" {
-		slog.Warn("すべての記事本文が空でした。空の出力を生成します。", slog.String("mode", "AI処理スキップ"))
-	}
-	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
-
-	return iohandler.WriteOutputString("", combinedText)
+	return combinedTextBuilder.String(), nil
 }
