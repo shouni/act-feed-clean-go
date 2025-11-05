@@ -146,6 +146,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("AI処理スキップモードでスクリプトが正常に生成されました。", slog.String("mode", "AIスキップ"))
 	// 5. 出力分岐 (AI処理スキップ結果の出力)
 	return p.handleOutput(ctx, combinedScriptText)
 }
