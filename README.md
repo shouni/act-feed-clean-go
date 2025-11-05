@@ -84,11 +84,11 @@ AI処理や音声合成を実行する際には、以下の環境変数または
 
 #### フラグ一覧
 
-| フラグ | 短縮形 | 説明 | デフォルト値 |
-| :--- |:----| :--- | :--- |
+| フラグ | 短縮形  | 説明 | デフォルト値 |
+| :--- |:-----| :--- | :--- |
 | `--feed-url` | `-f` | **処理対象のRSSフィードURL**。 | `https://news.yahoo.co.jp/rss/categories/it.xml` |
 | `--parallel` | `-p` | Webスクレイピングの**最大同時並列リクエスト数**。 | `10` |
-| `--http-timeout` | `-s` | Webスクレイピングの**HTTPタイムアウト時間**。 | `30s` |
+| `--http-timeout` | `-t` | Webスクレイピングの**HTTPタイムアウト時間**。 | `30s` |
 | `--output-wav-path` | `-v` | 音声合成されたWAVファイルの出力パス。このフラグと`VOICEVOX_API_URL`が設定されている場合にWAVファイルが出力されます。 | `asset/audio_output.wav` |
 | **`--map-model`** | (なし) | **Mapフェーズ（記事のクリーンアップ・要約）に使用するAIモデル名**。 | `gemini-2.5-flash` |
 | **`--reduce-model`** | (なし) | **Reduceフェーズ（中間統合要約）に使用するAIモデル名**。 | `gemini-2.5-flash` |

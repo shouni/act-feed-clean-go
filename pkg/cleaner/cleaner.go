@@ -133,8 +133,7 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 // ----------------------------------------------------------------
 
 // CombineContents は、成功した抽出結果の本文を効率的に結合します。
-// (変更なし)
-func CombineContents(results []types.URLResult) string {
+func CombineContents(results []types.URLResult, titlesMap map[string]string) string {
 	var builder strings.Builder
 
 	// 成功した結果のみをフィルタリング
@@ -146,11 +145,21 @@ func CombineContents(results []types.URLResult) string {
 	}
 
 	for i, res := range validResults {
-		// URLを追記することで、LLMがどのソースのテキストであるかを識別できるようにする
-		builder.WriteString(fmt.Sprintf("--- SOURCE URL %d: %s ---\n", i+1, res.URL))
+		// URLからタイトルを取得。見つからない場合はURL自体をタイトルとして使用
+		title := titlesMap[res.URL]
+		if title == "" {
+			title = res.URL // フォールバック
+		}
+
+		// 1. LLMがソースを識別するためのURLとインデックスを追記
+		builder.WriteString(fmt.Sprintf("--- SOURCE DOCUMENT %d ---\n", i+1))
+		builder.WriteString(fmt.Sprintf("TITLE: %s\n", title))
+		builder.WriteString(fmt.Sprintf("URL: %s\n\n", res.URL))
+
+		// 2. 本文を追加
 		builder.WriteString(res.Content)
 
-		// 最後の文書でなければ明確な区切り文字を追加
+		// 3. 最後の文書でなければ明確な区切り文字を追加
 		if i < len(validResults)-1 {
 			builder.WriteString(ContentSeparator)
 		}

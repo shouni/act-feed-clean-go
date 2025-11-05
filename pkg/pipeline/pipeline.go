@@ -1,16 +1,15 @@
 package pipeline
 
 import (
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/feed"
-	"act-feed-clean-go/pkg/scraper"
-	"act-feed-clean-go/pkg/types"
 	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	"github.com/shouni/go-http-kit/pkg/httpkit"
+	"act-feed-clean-go/pkg/cleaner"
+	"act-feed-clean-go/pkg/types"
+
+	// 以下のパッケージは外部依存としてそのまま維持
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
@@ -23,12 +22,30 @@ type PipelineConfig struct {
 	OutputWAVPath string
 }
 
+// ParsedFeed は抽出された記事のリンクとタイトル
+type ParsedFeed struct {
+	Link  string
+	Title string
+}
+
+// FeedParser はフィードの取得とリンク抽出の責務を負う
+// ★ 修正: Runメソッドの呼び出しに合わせ、feedTitle (string) を最初の戻り値に追加
+type FeedParser interface {
+	FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []ParsedFeed, err error)
+}
+
+// ScraperExecutor は scraper.Scraper インターフェースに一致 (既存の定義を再利用)
+type ScraperExecutor interface {
+	ScrapeInParallel(ctx context.Context, urls []string) []types.URLResult
+}
+
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
 	// 依存関係 (Public fields)
-	Client                 *httpkit.Client
+	// ★ 修正: 依存関係をインターフェース型に変更
+	FeedParser             FeedParser
 	Extractor              *extract.Extractor
-	Scraper                scraper.Scraper
+	Scraper                ScraperExecutor
 	Cleaner                *cleaner.Cleaner
 	VoicevoxEngineExecutor voicevox.EngineExecutor
 
@@ -41,18 +58,18 @@ type Pipeline struct {
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
 func New(
-	client *httpkit.Client,
+	feedParser FeedParser, // ★ 修正: インターフェース型を使用
 	extractor *extract.Extractor,
-	scraperInstance scraper.Scraper,
+	scraperInstance ScraperExecutor, // ★ 修正: ScraperExecutor インターフェース型を使用
 	cleanerInstance *cleaner.Cleaner,
 	VoicevoxEngineExecutor voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
-		Client:    client,
-		Extractor: extractor,
-		Scraper:   scraperInstance,
-		Cleaner:   cleanerInstance,
+		FeedParser: feedParser, // ★ 修正: インターフェース型として代入
+		Extractor:  extractor,
+		Scraper:    scraperInstance, // ★ 修正: インターフェース型として代入
+		Cleaner:    cleanerInstance,
 
 		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
 		OutputWAVPath:          config.OutputWAVPath,
@@ -66,22 +83,22 @@ func New(
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// --- 1. RSSフィードの取得とURLリスト生成 ---
-	rssFeed, err := feed.FetchAndParse(ctx, p.Client, feedURL)
+	// FeedParserインターフェースのシグネチャに一致
+	feedTitle, parsedItems, err := p.FeedParser.FetchAndExtractLinks(ctx, feedURL)
 	if err != nil {
-		slog.Error("RSSフィードの取得・パースに失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("RSSフィードの取得・パースに失敗しました: %w", err)
+		slog.Error("RSSフィードの取得・パース・リンク抽出に失敗しました", slog.String("error", err.Error()))
+		return fmt.Errorf("RSSフィードの取得・パース・リンク抽出に失敗しました: %w", err)
 	}
 
-	urlsToScrape := make([]string, 0, len(rssFeed.Items))
+	urlsToScrape := make([]string, 0, len(parsedItems))
 	articleTitlesMap := make(map[string]string)
 
-	for _, item := range rssFeed.Items {
+	for _, item := range parsedItems {
 		if item.Link != "" && item.Title != "" {
 			urlsToScrape = append(urlsToScrape, item.Link)
-			articleTitlesMap[item.Link] = item.Title
+			articleTitlesMap[item.Link] = item.Title // タイトルマップに格納
 		}
 	}
-
 	if len(urlsToScrape) == 0 {
 		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
 	}
@@ -93,13 +110,17 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	)
 
 	// --- 2. Scraperによる並列抽出の実行 ---
+	// types.URLResult のスライスが返される
 	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
 
-	// --- 3. 抽出結果の確認とAI処理の分岐 ---
+	// --- 3. 抽出結果の確認と成功リストの作成 ---
 	successCount := 0
+	var successfulResults []types.URLResult
+
 	for _, res := range results {
 		if res.Error == nil {
 			successCount++
+			successfulResults = append(successfulResults, res) // 成功した結果を格納
 		} else {
 			slog.Warn("抽出エラー",
 				slog.String("url", res.URL),
@@ -118,7 +139,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// --- 4. AI処理の実行 (ヘルパーメソッドに委譲) ---
-	scriptText, err := p.processWithAI(ctx, rssFeed.Title, results)
+	scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
 	if err != nil {
 		return err // エラーは processWithAI 内で詳細化されている
 	}
@@ -132,11 +153,13 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 // ----------------------------------------------------------------------
 
 // processWithAI は AI による Map-Reduce、Summary、Script Generation を実行します。
-func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results []types.URLResult) (string, error) {
+// ★ 修正: titlesMap を引数に追加
+func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results []types.URLResult, titlesMap map[string]string) (string, error) {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
-	// Map-Reduce
-	combinedTextForAI := cleaner.CombineContents(results)
+	// Map-Reduce のための結合テキスト構築
+	combinedTextForAI := cleaner.CombineContents(results, titlesMap)
+
 	reduceResult, err := p.Cleaner.CleanAndStructureText(ctx, combinedTextForAI)
 	if err != nil {
 		slog.Error("AIによるコンテンツの構造化に失敗しました", slog.String("error", err.Error()))
@@ -146,7 +169,6 @@ func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results 
 	// Final Summary
 	title := cleaner.ExtractTitleFromMarkdown(reduceResult)
 	if title == "" {
-		// 修正: 複雑なフォールバックロジックを削除し、フィードタイトルを代替として使用
 		slog.Warn("AIによるタイトル抽出に失敗しました。フィードのタイトルを代替として使用します。", slog.String("fallback_title", feedTitle))
 		title = feedTitle
 	}
@@ -185,7 +207,7 @@ func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 	}
 
 	// 5-B. テキスト出力
-	return iohandler.WriteOutputString("", scriptText) // 修正: string を渡す
+	return iohandler.WriteOutputString("", scriptText)
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理
@@ -220,6 +242,5 @@ func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult,
 	}
 	slog.Info("スクリプト生成結果", slog.String("mode", "AI処理スキップ"))
 
-	// 修正: iohandler.WriteOutput に string を渡す
 	return iohandler.WriteOutputString("", combinedText)
 }

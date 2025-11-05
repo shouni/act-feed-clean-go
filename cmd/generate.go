@@ -12,20 +12,63 @@ import (
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
+	"github.com/shouni/go-http-kit/pkg/feed"
 	"github.com/shouni/go-http-kit/pkg/httpkit"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
+// ----------------------------------------------------------------------
+// アダプター構造体 (FeedParserインターフェースを満たすための修正)
+// ----------------------------------------------------------------------
+
+// FeedParserAdapter は *feed.Parser をラップし、
+// pipeline.FeedParser インターフェースを満たすために必要な
+// FetchAndExtractLinks メソッドを実装します。
+type FeedParserAdapter struct {
+	parser *feed.Parser
+}
+
+// FetchAndExtractLinks は pipeline.FeedParser インターフェースを実装します。
+// 内部の *feed.Parser.FetchAndParse を呼び出し、結果を pipeline.ParsedFeed に変換します。
+func (a *FeedParserAdapter) FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []pipeline.ParsedFeed, err error) {
+	// 内部の FetchAndParse を呼び出す
+	f, err := a.parser.FetchAndParse(ctx, feedURL)
+	if err != nil {
+		return "", nil, err
+	}
+
+	feedTitle = f.Title
+
+	// 記事のタイトルとリンクを抽出
+	extractedItems := make([]pipeline.ParsedFeed, 0, len(f.Items))
+	for _, item := range f.Items {
+		if item.Link != "" && item.Title != "" {
+			extractedItems = append(extractedItems, pipeline.ParsedFeed{
+				Link:  item.Link,
+				Title: item.Title,
+			})
+		}
+	}
+
+	if len(extractedItems) == 0 {
+		return feedTitle, nil, fmt.Errorf("フィード (%s) から有効な記事URLが見つかりませんでした", feedTitle)
+	}
+
+	return feedTitle, extractedItems, nil
+}
+
+// ----------------------------------------------------------------------
 // 構造体と定数
+// ----------------------------------------------------------------------
 
 // appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
 type appDependencies struct {
+	FeedParser             pipeline.FeedParser // ★ アダプターが満たすインターフェース
 	Extractor              *extract.Extractor
 	Scraper                scraper.Scraper
 	Cleaner                *cleaner.Cleaner
 	VoicevoxEngineExecutor voicevox.EngineExecutor
-	HTTPClient             *httpkit.Client
 	PipelineConfig         pipeline.PipelineConfig
 }
 
@@ -46,16 +89,21 @@ func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
 // フラグ情報は引数 f から一貫して取得されます。
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
-
-	// 1. HTTPクライアントの初期化
-	httpClient := createHTTPClient(f.HttpTimeout)
-	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.HttpTimeout))
-
 	// PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
 		Verbose:       clibase.Flags.Verbose,
 		Parallel:      f.Parallel,
 		OutputWAVPath: f.OutputWAVPath,
+	}
+
+	// 1. HTTPクライアントの初期化
+	httpClient := createHTTPClient(f.HttpTimeout)
+	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.HttpTimeout))
+
+	// 2. FeedParser の初期化 (HTTPClient に依存)
+	rawFeedParser := feed.NewParser(httpClient)
+	feedParserAdapterInstance := &FeedParserAdapter{
+		parser: rawFeedParser,
 	}
 
 	// 2. Extractorの初期化
@@ -92,7 +140,7 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 	}
 
 	return &appDependencies{
-		HTTPClient:             httpClient,
+		FeedParser:             feedParserAdapterInstance, // ★ Adapter を代入
 		Extractor:              extractor,
 		Scraper:                scraperInstance,
 		Cleaner:                cleanerInstance,
