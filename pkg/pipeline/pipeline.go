@@ -29,7 +29,6 @@ type ParsedFeed struct {
 }
 
 // FeedParser はフィードの取得とリンク抽出の責務を負う
-// ★ 修正: Runメソッドの呼び出しに合わせ、feedTitle (string) を最初の戻り値に追加
 type FeedParser interface {
 	FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []ParsedFeed, err error)
 }

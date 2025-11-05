@@ -30,7 +30,6 @@ type FeedParserAdapter struct {
 }
 
 // FetchAndExtractLinks は pipeline.FeedParser インターフェースを実装します。
-// 内部の *feed.Parser.FetchAndParse を呼び出し、結果を pipeline.ParsedFeed に変換します。
 func (a *FeedParserAdapter) FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []pipeline.ParsedFeed, err error) {
 	// 内部の FetchAndParse を呼び出す
 	f, err := a.parser.FetchAndParse(ctx, feedURL)
@@ -64,7 +63,7 @@ func (a *FeedParserAdapter) FetchAndExtractLinks(ctx context.Context, feedURL st
 
 // appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
 type appDependencies struct {
-	FeedParser             pipeline.FeedParser // ★ アダプターが満たすインターフェース
+	FeedParser             pipeline.FeedParser
 	Extractor              *extract.Extractor
 	Scraper                scraper.Scraper
 	Cleaner                *cleaner.Cleaner
