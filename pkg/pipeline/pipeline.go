@@ -151,7 +151,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 // ----------------------------------------------------------------------
 
 // processWithAI は AI による Map-Reduce、Summary、Script Generation を実行します。
-// ★ 修正: titlesMap を引数に追加
 func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results []types.URLResult, titlesMap map[string]string) (string, error) {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
