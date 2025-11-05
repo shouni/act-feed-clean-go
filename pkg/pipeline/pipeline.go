@@ -194,7 +194,6 @@ func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 	// 5-A. VOICEVOXによる音声合成とWAV出力
 	if p.VoicevoxEngineExecutor != nil && p.config.OutputWAVPath != "" {
 		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.config.OutputWAVPath))
-		// configを使用するように修正
 		err := p.VoicevoxEngineExecutor.Execute(ctx, scriptText, p.config.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
@@ -212,9 +211,7 @@ func (p *Pipeline) processWithoutAI(feedTitle string, successfulResults []types.
 	var combinedTextBuilder strings.Builder
 	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
 
-	for _, res := range successfulResults { // successfulResults のみを使用するように修正
-		// エラーチェックはRunで行っているため不要
-		// if res.Error != nil { ... }
+	for _, res := range successfulResults {
 
 		articleTitle := titlesMap[res.URL]
 		if articleTitle == "" {
