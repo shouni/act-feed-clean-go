@@ -17,11 +17,7 @@ import (
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
 
-// ----------------------------------------------------------------------
-// 構造体と定数 (generate.go に移動)
-// ----------------------------------------------------------------------
-
-const maxRetries = 3 // root.go から移動
+// 構造体と定数
 
 // appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
 type appDependencies struct {
@@ -33,26 +29,25 @@ type appDependencies struct {
 	PipelineConfig         pipeline.PipelineConfig
 }
 
-// ----------------------------------------------------------------------
-// ヘルパー関数 (ロギング、正規化、初期化) (createHTTPClient を移動)
-// ----------------------------------------------------------------------
+// ヘルパー関数 (初期化)
 
 // createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
 func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
+	// maxRetries を関数スコープに移動し、可読性と安全性を向上
+	const maxRetries = 3
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
 	return httpkit.New(scrapeTimeout, clientOptions...)
 }
 
-// ----------------------------------------------------------------------
 // 依存関係構築 (メイン責務)
-// ----------------------------------------------------------------------
 
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
+// フラグ情報は引数 f から一貫して取得されます。
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
 
-	// 1. HTTPクライアントの初期化 (ヘルパー関数を使用)
+	// 1. HTTPクライアントの初期化
 	httpClient := createHTTPClient(f.HttpTimeout)
 	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.HttpTimeout))
 
@@ -80,17 +75,18 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
 	}
 
-	// 既存のFlagsを使用
+	// グローバル変数ではなく、引数 f から CleanerConfig を使用
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
-		Flags.CleanerConfig,
+		f.CleanerConfig,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
 
 	// 5. VOICEVOX Engineの初期化
-	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, Flags.HttpTimeout, config.OutputWAVPath != "")
+	// グローバル変数ではなく、引数 f から HttpTimeout を使用
+	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, f.HttpTimeout, config.OutputWAVPath != "")
 	if err != nil {
 		return nil, err
 	}
