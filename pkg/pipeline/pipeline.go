@@ -1,16 +1,14 @@
 package pipeline
 
 import (
-	"context"
-	"fmt"
-	"log/slog"
-	"strings"
-	"time"
-
 	"act-feed-clean-go/pkg/cleaner"
 	"act-feed-clean-go/pkg/feed"
 	"act-feed-clean-go/pkg/scraper"
 	"act-feed-clean-go/pkg/types"
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
 
 	"github.com/shouni/go-http-kit/pkg/httpkit"
 	"github.com/shouni/go-utils/iohandler"
@@ -20,23 +18,19 @@ import (
 
 // PipelineConfig はパイプライン実行のためのすべての設定値を保持します。
 type PipelineConfig struct {
-	Parallel           int
-	Verbose            bool
-	LLMAPIKey          string
-	VoicevoxAPIURL     string
-	OutputWAVPath      string
-	ScrapeTimeout      time.Duration
-	VoicevoxAPITimeout time.Duration
+	Parallel      int
+	Verbose       bool
+	OutputWAVPath string
 }
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
 	// 依存関係 (Public fields)
-	Client         *httpkit.Client
-	Extractor      *extract.Extractor
-	Scraper        scraper.Scraper
-	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine voicevox.EngineExecutor
+	Client                 *httpkit.Client
+	Extractor              *extract.Extractor
+	Scraper                scraper.Scraper
+	Cleaner                *cleaner.Cleaner
+	VoicevoxEngineExecutor voicevox.EngineExecutor
 
 	// 設定値 (Private)
 	config PipelineConfig
@@ -51,7 +45,7 @@ func New(
 	extractor *extract.Extractor,
 	scraperInstance scraper.Scraper,
 	cleanerInstance *cleaner.Cleaner,
-	vvEngine voicevox.EngineExecutor,
+	VoicevoxEngineExecutor voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
@@ -60,8 +54,8 @@ func New(
 		Scraper:   scraperInstance,
 		Cleaner:   cleanerInstance,
 
-		VoicevoxEngine: vvEngine,
-		OutputWAVPath:  config.OutputWAVPath,
+		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
+		OutputWAVPath:          config.OutputWAVPath,
 
 		// 設定値全体を保持
 		config: config,
@@ -123,12 +117,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// LLMAPIKeyがない場合はAI処理をスキップ
-	if p.config.LLMAPIKey == "" {
-		slog.Info("LLM APIキー未設定のため、AI処理をスキップし、抽出結果をテキストで出力します。")
-		return p.processWithoutAI(rssFeed.Title, results, articleTitlesMap)
-	}
-
 	// --- 4. AI処理の実行 (ヘルパーメソッドに委譲) ---
 	scriptText, err := p.processWithAI(ctx, rssFeed.Title, results)
 	if err != nil {
@@ -186,17 +174,13 @@ func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results 
 // handleOutput は音声合成またはテキスト出力を実行します。
 func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 	// 5-A. VOICEVOXによる音声合成とWAV出力
-	if p.VoicevoxEngine != nil && p.OutputWAVPath != "" {
-		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.OutputWAVPath))
-
-		// VoicevoxEngine.Executeが voicevox.EngineExecutor インターフェースを満たすと仮定
-		err := p.VoicevoxEngine.Execute(ctx, scriptText, p.OutputWAVPath)
+	if p.VoicevoxEngineExecutor != nil && p.config.OutputWAVPath != "" {
+		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.config.OutputWAVPath))
+		err := p.VoicevoxEngineExecutor.Execute(ctx, scriptText, p.config.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
 		}
-		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.OutputWAVPath)
-
-		// 音声合成が成功したら、テキスト出力をスキップして終了
+		slog.Info("VOICEVOXによる音声合成が完了し、ファイルに保存されました。", "output_file", p.config.OutputWAVPath)
 		return nil
 	}
 
