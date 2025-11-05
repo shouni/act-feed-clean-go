@@ -9,7 +9,6 @@ import (
 	"act-feed-clean-go/pkg/cleaner"
 	"act-feed-clean-go/pkg/types"
 
-	// 以下のパッケージは外部依存としてそのまま維持
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/go-web-exact/v2/pkg/extract"
@@ -41,17 +40,15 @@ type ScraperExecutor interface {
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
 	// 依存関係 (Public fields)
-	FeedParser             FeedParser
-	Extractor              *extract.Extractor
-	Scraper                ScraperExecutor
+	FeedParser FeedParser
+	Extractor  *extract.Extractor
+	Scraper    ScraperExecutor
+	// CleanerはLLMが利用できない場合nilになり得る
 	Cleaner                *cleaner.Cleaner
 	VoicevoxEngineExecutor voicevox.EngineExecutor
 
-	// 設定値 (Private)
+	// 設定値 (Private) - 設定値はすべてここに集約する
 	config PipelineConfig
-
-	// 出力パス (Public)
-	OutputWAVPath string
 }
 
 // New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
@@ -64,13 +61,11 @@ func New(
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
-		FeedParser: feedParser,
-		Extractor:  extractor,
-		Scraper:    scraperInstance,
-		Cleaner:    cleanerInstance,
-
+		FeedParser:             feedParser,
+		Extractor:              extractor,
+		Scraper:                scraperInstance,
+		Cleaner:                cleanerInstance, // LLMが利用できない場合はnilが注入される
 		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
-		OutputWAVPath:          config.OutputWAVPath,
 
 		// 設定値全体を保持
 		config: config,
@@ -81,7 +76,6 @@ func New(
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// --- 1. RSSフィードの取得とURLリスト生成 ---
-	// FeedParserインターフェースのシグネチャに一致
 	feedTitle, parsedItems, err := p.FeedParser.FetchAndExtractLinks(ctx, feedURL)
 	if err != nil {
 		slog.Error("RSSフィードの取得・パース・リンク抽出に失敗しました", slog.String("error", err.Error()))
@@ -108,7 +102,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	)
 
 	// --- 2. Scraperによる並列抽出の実行 ---
-	// types.URLResult のスライスが返される
 	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
 
 	// --- 3. 抽出結果の確認と成功リストの作成 ---
@@ -136,14 +129,20 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// --- 4. AI処理の実行 (ヘルパーメソッドに委譲) ---
-	scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
-	if err != nil {
-		return err // エラーは processWithAI 内で詳細化されている
+	// --- 4. AI処理の実行分岐 ---
+	if p.Cleaner != nil {
+		// LLMが利用可能な場合
+		scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
+		if err != nil {
+			return err
+		}
+		// 5. 出力分岐 (AI処理結果の出力)
+		return p.handleOutput(ctx, scriptText)
 	}
 
-	// --- 5. 出力分岐 ---
-	return p.handleOutput(ctx, scriptText)
+	// LLMが利用不可の場合 (AI処理スキップ)
+	slog.Info("AI処理コンポーネントが未設定のため、抽出結果を結合して出力します。", slog.String("mode", "AIスキップ"))
+	return p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
 }
 
 // ----------------------------------------------------------------------
@@ -195,6 +194,7 @@ func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 	// 5-A. VOICEVOXによる音声合成とWAV出力
 	if p.VoicevoxEngineExecutor != nil && p.config.OutputWAVPath != "" {
 		slog.Info("AI生成スクリプトをVOICEVOXで音声合成します", slog.String("output", p.config.OutputWAVPath))
+		// configを使用するように修正
 		err := p.VoicevoxEngineExecutor.Execute(ctx, scriptText, p.config.OutputWAVPath)
 		if err != nil {
 			return fmt.Errorf("音声合成パイプラインの実行に失敗しました: %w", err)
@@ -208,18 +208,13 @@ func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理
-func (p *Pipeline) processWithoutAI(feedTitle string, results []types.URLResult, titlesMap map[string]string) error {
+func (p *Pipeline) processWithoutAI(feedTitle string, successfulResults []types.URLResult, titlesMap map[string]string) error {
 	var combinedTextBuilder strings.Builder
 	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
 
-	for _, res := range results {
-		if res.Error != nil {
-			slog.Warn("抽出失敗 (処理スキップ)",
-				slog.String("url", res.URL),
-				slog.String("mode", "AI処理スキップ"),
-			)
-			continue
-		}
+	for _, res := range successfulResults { // successfulResults のみを使用するように修正
+		// エラーチェックはRunで行っているため不要
+		// if res.Error != nil { ... }
 
 		articleTitle := titlesMap[res.URL]
 		if articleTitle == "" {
