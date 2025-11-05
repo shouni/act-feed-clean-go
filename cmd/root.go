@@ -25,17 +25,11 @@ import (
 
 // RunFlags は 'run' コマンド固有のフラグを保持する構造体です。
 type RunFlags struct {
-	LLMAPIKey          string
-	FeedURL            string
-	Parallel           int
-	ScrapeTimeout      time.Duration
-	VoicevoxAPIURL     string
-	OutputWAVPath      string
-	VoicevoxAPITimeout time.Duration
-	MapModelName       string
-	ReduceModelName    string
-	SummaryModelName   string
-	ScriptModelName    string
+	FeedURL       string
+	Parallel      int
+	HttpTimeout   time.Duration
+	OutputWAVPath string
+	CleanerConfig cleaner.CleanerConfig
 }
 
 var Flags RunFlags
@@ -48,12 +42,12 @@ const (
 
 // appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
 type appDependencies struct {
-	Extractor      *extract.Extractor
-	Scraper        scraper.Scraper
-	Cleaner        *cleaner.Cleaner
-	VoicevoxEngine *voicevox.Engine
-	HTTPClient     *httpkit.Client
-	PipelineConfig pipeline.PipelineConfig
+	Extractor              *extract.Extractor
+	Scraper                scraper.Scraper
+	Cleaner                *cleaner.Cleaner
+	VoicevoxEngineExecutor voicevox.EngineExecutor
+	HTTPClient             *httpkit.Client
+	PipelineConfig         pipeline.PipelineConfig
 }
 
 // ----------------------------------------------------------------------
@@ -80,59 +74,12 @@ func initLogger() {
 	slog.Info("ロガーを初期化しました", slog.String("level", logLevel.String()))
 }
 
-// normalizeFlags は、フラグと環境変数から最終的な設定を決定します。
-func normalizeFlags(f *RunFlags) {
-	if f.LLMAPIKey == "" {
-		f.LLMAPIKey = os.Getenv("GEMINI_API_KEY")
-	}
-	if f.VoicevoxAPIURL == "" {
-		f.VoicevoxAPIURL = os.Getenv("VOICEVOX_API_URL")
-	}
-}
-
-func initLLMClient(ctx context.Context, apiKey string) (*gemini.Client, error) {
-	if apiKey != "" {
-		return gemini.NewClient(ctx, gemini.Config{APIKey: apiKey})
-	}
-	return gemini.NewClientFromEnv(ctx)
-}
-
 // createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
 func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
 	clientOptions := []httpkit.ClientOption{
 		httpkit.WithMaxRetries(maxRetries),
 	}
 	return httpkit.New(scrapeTimeout, clientOptions...)
-}
-
-// initializeVoicevoxEngine は VOICEVOX Engineの初期化を独立させます。
-func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConfig) (*voicevox.Engine, error) {
-	if config.VoicevoxAPIURL == "" {
-		return nil, nil // VOICEVOXを使用しない
-	}
-
-	slog.Info("VOICEVOXクライアントを初期化します", slog.String("url", config.VoicevoxAPIURL))
-
-	vvClient := voicevox.NewClient(config.VoicevoxAPIURL, config.VoicevoxAPITimeout)
-
-	// 修正済み: ロード処理のコンテキストを親コンテキスト (ctx) から派生させる
-	loadCtx, cancel := context.WithTimeout(ctx, config.VoicevoxAPITimeout)
-	defer cancel()
-
-	speakerData, loadErr := voicevox.LoadSpeakers(loadCtx, vvClient)
-	if loadErr != nil {
-		slog.Error("VOICEVOX話者データのロードに失敗しました", slog.String("error", loadErr.Error()))
-		return nil, fmt.Errorf("VOICEVOX話者データのロードに失敗しました: %w", loadErr)
-	}
-	slog.Info("VOICEVOX話者データとスタイルデータのロードが完了しました。") // より包括的なメッセージ
-
-	parser := voicevox.NewTextParser()
-	engineConfig := voicevox.EngineConfig{
-		MaxParallelSegments: voicevox.DefaultMaxParallelSegments,
-		SegmentTimeout:      voicevox.DefaultSegmentTimeout,
-	}
-
-	return voicevox.NewEngine(vvClient, speakerData, parser, engineConfig), nil
 }
 
 // ----------------------------------------------------------------------
@@ -143,18 +90,14 @@ func initializeVoicevoxEngine(ctx context.Context, config *pipeline.PipelineConf
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
 
 	// 1. HTTPクライアントの初期化 (ヘルパー関数を使用)
-	httpClient := createHTTPClient(f.ScrapeTimeout)
-	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.ScrapeTimeout))
+	httpClient := createHTTPClient(f.HttpTimeout)
+	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.HttpTimeout))
 
 	// PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
-		Verbose:            clibase.Flags.Verbose,
-		Parallel:           f.Parallel,
-		LLMAPIKey:          f.LLMAPIKey,
-		VoicevoxAPIURL:     f.VoicevoxAPIURL,
-		OutputWAVPath:      f.OutputWAVPath,
-		ScrapeTimeout:      f.ScrapeTimeout,
-		VoicevoxAPITimeout: f.VoicevoxAPITimeout,
+		Verbose:       clibase.Flags.Verbose,
+		Parallel:      f.Parallel,
+		OutputWAVPath: f.OutputWAVPath,
 	}
 
 	// 2. Extractorの初期化
@@ -167,42 +110,34 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 	// 3. Scraperの初期化
 	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
 
-	// 4. LLM Client & Cleanerの初期化
-	client, err := initLLMClient(ctx, config.LLMAPIKey)
+	// 4. geminiの初期化
+	client, err := gemini.NewClientFromEnv(ctx)
 	if err != nil {
 		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
 	}
 
-	cleanerConfig := cleaner.CleanerConfig{
-		MapModel:     f.MapModelName,
-		ReduceModel:  f.ReduceModelName,
-		SummaryModel: f.SummaryModelName,
-		ScriptModel:  f.ScriptModelName,
-		Verbose:      config.Verbose,
-	}
-
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
-		cleanerConfig,
+		Flags.CleanerConfig,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
 
-	// 5. VOICEVOX Engineの初期化 (ヘルパー関数を使用)
-	vvEngine, err := initializeVoicevoxEngine(ctx, &config)
+	// 5. VOICEVOX Engineの初期化
+	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, Flags.HttpTimeout, config.OutputWAVPath != "")
 	if err != nil {
 		return nil, err
 	}
 
 	return &appDependencies{
-		HTTPClient:     httpClient,
-		Extractor:      extractor,
-		Scraper:        scraperInstance,
-		Cleaner:        cleanerInstance,
-		VoicevoxEngine: vvEngine,
-		PipelineConfig: config,
+		HTTPClient:             httpClient,
+		Extractor:              extractor,
+		Scraper:                scraperInstance,
+		Cleaner:                cleanerInstance,
+		VoicevoxEngineExecutor: voicevoxExecutor,
+		PipelineConfig:         config,
 	}, nil
 }
 
@@ -218,8 +153,6 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 	initLogger()
 
-	normalizeFlags(&Flags)
-
 	// 1. 依存関係の構築（ヘルパー関数に委譲）
 	deps, err := newAppDependencies(ctx, Flags)
 	if err != nil {
@@ -232,7 +165,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		deps.Extractor,
 		deps.Scraper,
 		deps.Cleaner,
-		deps.VoicevoxEngine,
+		deps.VoicevoxEngineExecutor,
 		deps.PipelineConfig,
 	)
 
@@ -246,28 +179,21 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 // addRunFlags は 'run' コマンドに固有のフラグを設定します。
 func addRunFlags(runCmd *cobra.Command) {
-	runCmd.Flags().StringVarP(&Flags.LLMAPIKey,
-		"llm-api-key", "k", "", "Gemini APIキー (これが設定されている場合のみAI処理が実行されます)")
 	runCmd.Flags().StringVarP(&Flags.FeedURL,
 		"feed-url", "f", "https://news.yahoo.co.jp/rss/categories/it.xml", "処理対象のRSSフィードURL")
 	runCmd.Flags().IntVarP(&Flags.Parallel,
 		"parallel", "p", 10, "Webスクレイピングの最大同時並列リクエスト数")
-	runCmd.Flags().DurationVarP(&Flags.ScrapeTimeout,
-		"scraper-timeout", "s", 15*time.Second, "WebスクレイピングのHTTPタイムアウト時間")
-	runCmd.Flags().StringVar(&Flags.VoicevoxAPIURL,
-		"voicevox-api-url", "", "VOICEVOXエンジンのAPI URL。環境変数からも読み込みます。")
-	runCmd.Flags().DurationVar(&Flags.VoicevoxAPITimeout,
-		"voicevox-api-timeout", 30*time.Second, "VOICEVOX API (audio_query, synthesis) のHTTPタイムアウト時間")
+	runCmd.Flags().DurationVarP(&Flags.HttpTimeout,
+		"http-timeout", "s", 30*time.Second, "HTTPタイムアウト時間")
 	runCmd.Flags().StringVarP(&Flags.OutputWAVPath,
 		"output-wav-path", "v", "asset/audio_output.wav", "音声合成されたWAVファイルの出力パス。")
-
-	runCmd.Flags().StringVar(&Flags.MapModelName,
+	runCmd.Flags().StringVar(&Flags.CleanerConfig.MapModel,
 		"map-model", cleaner.DefaultMapModelName, "Mapフェーズ (クリーンアップ) に使用するAIモデル名 (例: gemini-2.5-flash)。")
-	runCmd.Flags().StringVar(&Flags.ReduceModelName,
+	runCmd.Flags().StringVar(&Flags.CleanerConfig.ReduceModel,
 		"reduce-model", cleaner.DefaultReduceModelName, "Reduceフェーズ (スクリプト生成) に使用するAIモデル名 (例: gemini-2.5-pro)。")
-	runCmd.Flags().StringVar(&Flags.SummaryModelName,
+	runCmd.Flags().StringVar(&Flags.CleanerConfig.SummaryModel,
 		"summary-model", cleaner.DefaultSummaryModelName, "最終要約フェーズに使用するAIモデル名 (例: gemini-2.5-flash)。")
-	runCmd.Flags().StringVar(&Flags.ScriptModelName,
+	runCmd.Flags().StringVar(&Flags.CleanerConfig.ScriptModel,
 		"script-model", cleaner.DefaultScriptModelName, "スクリプト生成フェーズに使用するAIモデル名 (例: gemini-2.5-pro)。")
 }
 
