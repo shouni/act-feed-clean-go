@@ -106,17 +106,17 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		parser: rawFeedParser,
 	}
 
-	// 2. Extractorの初期化
+	// 3. Extractorの初期化
 	extractor, err := extract.NewExtractor(httpClient)
 	if err != nil {
 		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
 	}
 
-	// 3. Scraperの初期化
+	// 4. Scraperの初期化
 	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
 
-	// 4. geminiの初期化
+	// 5. geminiの初期化
 	client, err := gemini.NewClientFromEnv(ctx)
 	if err != nil {
 		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
@@ -132,15 +132,14 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
 
-	// 5. VOICEVOX Engineの初期化
-	// グローバル変数ではなく、引数 f から HttpTimeout を使用
+	// 6. VOICEVOX Engineの初期化
 	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, f.HttpTimeout, config.OutputWAVPath != "")
 	if err != nil {
 		return nil, err
 	}
 
 	return &appDependencies{
-		FeedParser:             feedParserAdapterInstance, // ★ Adapter を代入
+		FeedParser:             feedParserAdapterInstance,
 		Extractor:              extractor,
 		Scraper:                scraperInstance,
 		Cleaner:                cleanerInstance,
