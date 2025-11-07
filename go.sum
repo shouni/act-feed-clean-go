@@ -95,10 +95,10 @@ github.com/shouni/go-utils v1.0.7 h1:tLDVile32/z/Ez9pKWpdYMYYW4hu0ZhIOIUhqmPi8J0
 github.com/shouni/go-utils v1.0.7/go.mod h1:dQxOuVTvWFHWEH/G6izteLh+tubkI5Sl1jpDWlCSkBU=
 github.com/shouni/go-voicevox v1.1.1 h1:C3ePJB46NwXiB12lUHFm7BSjbh6mQjxKKgrgoGJGHrg=
 github.com/shouni/go-voicevox v1.1.1/go.mod h1:gqzaTg+147lT8ljlZysHr/BCS1TGAO22CEp0kSsPXCE=
-github.com/shouni/go-web-exact/v2 v2.0.8 h1:sioYOLVmrlabpssgamBTmL9NtNv7NGMshTZ4uqxeJf4=
-github.com/shouni/go-web-exact/v2 v2.0.8/go.mod h1:t9/InZDAHMySt3et+UhO5bokfHDswVITcLcWaYpRW1g=
-github.com/shouni/web-text-pipe-go v1.0.4 h1:VPrpjYssSM7kDNKMf1ZPTCG8A1yfAsT7QL66rxnVRpQ=
-github.com/shouni/web-text-pipe-go v1.0.4/go.mod h1:lO+6OcgfeTFyEhorQcqY29jhPeL0ux8K3m3pRkIctcY=
+github.com/shouni/go-web-exact/v2 v2.0.9 h1:anYE7ifCyLsqx3URLKHmB4tPSLlg9eSkVTdnFpmM9/8=
+github.com/shouni/go-web-exact/v2 v2.0.9/go.mod h1:t9/InZDAHMySt3et+UhO5bokfHDswVITcLcWaYpRW1g=
+github.com/shouni/web-text-pipe-go v1.0.5 h1:umfBHMWScrQ8TBRdduzZrwqg6L82+HJN/wvFWHEFFfU=
+github.com/shouni/web-text-pipe-go v1.0.5/go.mod h1:fqFdT/LXBZJl377xMdoGVFB1rvL3IDyQ3cur385+bWA=
 github.com/spf13/cobra v1.10.1 h1:lJeBwCfmrnXthfAupyUTzJ/J4Nc1RsHC/mSRU2dll/s=
 github.com/spf13/cobra v1.10.1/go.mod h1:7SmJGaTHFVBY0jW4NXGluQoLvhqFQM+6XSKD+P4XaB0=
 github.com/spf13/pflag v1.0.9/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=

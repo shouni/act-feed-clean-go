@@ -9,10 +9,9 @@ import (
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
+	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/web-text-pipe-go/pkg/scraper/builder"
 	"github.com/shouni/web-text-pipe-go/pkg/scraper/runner"
-
-	"github.com/shouni/go-voicevox/pkg/voicevox"
 )
 
 // ----------------------------------------------------------------------
@@ -39,7 +38,7 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		OutputWAVPath: f.OutputWAVPath,
 	}
 
-	// 1. Runnerを取得
+	// 1. scraperRunner
 	scraperRunner, err := builder.BuildScraperRunner(f.HttpTimeout, f.Parallel)
 	if err != nil {
 		slog.Error("scraperRunnerの初期化に失敗しました", slog.String("error", err.Error()))

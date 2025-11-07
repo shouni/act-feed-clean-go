@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"act-feed-clean-go/pkg/cleaner"
-	//	"act-feed-clean-go/pkg/types"
 
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
@@ -56,7 +55,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// --- 1. ScrapeAndRun の呼び出し ---
-	results, err := p.ScraperRunner.ScrapeAndRun(ctx, runnerConfig)
+	// 修正: 戻り値の型を *runner.RunnerResult に変更
+	runnerResult, err := p.ScraperRunner.ScrapeAndRun(ctx, runnerConfig)
 	if err != nil {
 		return err
 	}
@@ -65,24 +65,19 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	successCount := 0
 	var successfulResults []types.URLResult
 
-	// NOTE: 新しいアーキテクチャでは、フィードのメタデータ（feedTitle, articleTitlesMap）は
-	// ScrapeAndRunの外部からは直接取得できません。
-	// この修正では、AI処理分岐のために必要なこれらの変数を「ダミー」または「未取得」として扱い、
-	// AI処理をスキップするか、呼び出し元のロジックに依存しない形で結合処理を行います。
+	// 修正: runnerResult からメタデータと結果を取得
+	feedTitle := runnerResult.FeedTitle
+	articleTitlesMap := runnerResult.TitlesMap
+	// 処理対象のURL結果リスト
+	results := runnerResult.Results
 
-	// 暫定的なダミー値を使用 (AI処理/processWithoutAIで必要とされるため)
-	feedTitle := "スクレイピング結果"
-	articleTitlesMap := make(map[string]string)
-
-	totalProcessedURLs := len(results) // ScrapeAndRunで処理されたURLの総数
+	// ScrapeAndRun で処理されたURLの総数 (results の長さを使用)
+	totalProcessedURLs := len(results)
 
 	for _, res := range results {
 		if res.Error == nil {
 			successCount++
 			successfulResults = append(successfulResults, res) // 成功した結果を格納
-			// 暫定的にURLをキーとして、Contentをタイトルと仮定（正確なタイトルは取得不可）
-			// または、後続の処理でタイトルが必要ない場合はこの行を削除
-			articleTitlesMap[res.URL] = fmt.Sprintf("記事タイトル (URL: %s)", res.URL)
 		} else {
 			slog.Warn("抽出エラー",
 				slog.String("url", res.URL),
@@ -93,18 +88,16 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	slog.Info("抽出完了",
 		slog.Int("success", successCount),
-		slog.Int("total", totalProcessedURLs), // urlsToScrapeではなくresultsの長さを使用
+		slog.Int("total", totalProcessedURLs),
 	)
 
 	if successCount == 0 {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// --- 3. AI処理の実行分岐 ---
+	// --- 4. AI処理の実行分岐 ---
 	if p.Cleaner != nil {
 		// LLMが利用可能な場合
-		// NOTE: feedTitle, articleTitlesMap が正確な情報を含まない可能性があるため、
-		// processWithAIのロジックを見直す必要があります。ここではそのまま残します。
 		scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
 		if err != nil {
 			return err
@@ -115,8 +108,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// LLMが利用不可の場合 (AI処理スキップ)
 	slog.Info("AI処理コンポーネントが未設定のため、抽出結果を結合して出力します。", slog.String("mode", "AIスキップ"))
-	// NOTE: feedTitle, articleTitlesMap が正確な情報を含まない可能性があるため、
-	// processWithoutAIのロジックを見直す必要があります。ここではそのまま残します。
 	combinedScriptText, err := p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
 	if err != nil {
 		return err
