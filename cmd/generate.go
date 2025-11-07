@@ -33,6 +33,7 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 	config := pipeline.PipelineConfig{
 		Parallel:      f.Parallel,
 		OutputWAVPath: f.OutputWAVPath,
+		ClientTimeout: f.HttpTimeout,
 	}
 
 	// 1. scraperRunnerの初期化

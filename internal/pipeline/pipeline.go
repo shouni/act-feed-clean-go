@@ -20,6 +20,7 @@ type PipelineConfig struct {
 	Parallel      int
 	Verbose       bool
 	OutputWAVPath string
+	ClientTimeout time.Duration
 }
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
@@ -50,7 +51,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	runnerConfig := runner.RunnerConfig{
 		FeedURL:                  feedURL,
-		ClientTimeout:            3 * time.Second,
+		ClientTimeout:            p.config.ClientTimeout,
 		OverallTimeoutMultiplier: 3,
 	}
 
