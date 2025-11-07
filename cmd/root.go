@@ -78,7 +78,8 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 	pipelineConfig := pipeline.PipelineConfig{
 		Parallel:      Flags.Parallel,
 		OutputWAVPath: Flags.OutputWAVPath,
-		Verbose:       clibase.Flags.Verbose, // clibaseから値を取得して設定
+		ClientTimeout: Flags.HttpTimeout,
+		Verbose:       clibase.Flags.Verbose,
 	}
 
 	// 2. Pipelineインスタンスを生成（依存関係を注入）
