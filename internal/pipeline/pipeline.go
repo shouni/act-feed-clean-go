@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"act-feed-clean-go/pkg/cleaner"
+	"act-feed-clean-go/internal/cleaner"
 
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
@@ -30,7 +30,7 @@ type Pipeline struct {
 	config                 PipelineConfig
 }
 
-// New 関数
+// New は新しい Pipeline インスタンスを初期化し、必要な依存関係と設定を注入します。
 func New(
 	ScraperRunner *runner.Runner,
 	cleanerInstance *cleaner.Cleaner,
@@ -38,7 +38,7 @@ func New(
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
-		ScraperRunner:          ScraperRunner, // そのままポインタを格納
+		ScraperRunner:          ScraperRunner,
 		Cleaner:                cleanerInstance,
 		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
 		config:                 config,

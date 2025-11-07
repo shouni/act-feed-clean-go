@@ -1,13 +1,13 @@
 package cmd
 
 import (
+	"act-feed-clean-go/internal/pipeline"
 	"context"
 	"log/slog"
 	"os"
 	"time"
 
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/pipeline"
+	"act-feed-clean-go/internal/cleaner"
 
 	"github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"

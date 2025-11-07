@@ -1,14 +1,13 @@
 package cmd
 
 import (
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/pipeline"
+	"act-feed-clean-go/internal/cleaner"
+	"act-feed-clean-go/internal/pipeline"
 	"context"
 	"fmt"
 	"log/slog"
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
-	"github.com/shouni/go-cli-base"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
 	"github.com/shouni/web-text-pipe-go/pkg/scraper/builder"
 	"github.com/shouni/web-text-pipe-go/pkg/scraper/runner"
@@ -31,14 +30,12 @@ type appDependencies struct {
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
 // フラグ情報は引数 f から一貫して取得されます。
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
-	// PipelineConfig 構造体を組み立て
 	config := pipeline.PipelineConfig{
-		Verbose:       clibase.Flags.Verbose,
 		Parallel:      f.Parallel,
 		OutputWAVPath: f.OutputWAVPath,
 	}
 
-	// 1. scraperRunner
+	// 1. scraperRunnerの初期化
 	scraperRunner, err := builder.BuildScraperRunner(f.HttpTimeout, f.Parallel)
 	if err != nil {
 		slog.Error("scraperRunnerの初期化に失敗しました", slog.String("error", err.Error()))
