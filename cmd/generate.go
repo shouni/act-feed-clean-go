@@ -54,7 +54,7 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 	}
 
 	// 4. VOICEVOX Engineの初期化
-	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, f.HttpTimeout, config.OutputWAVPath != "")
+	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, f.HttpTimeout, f.OutputWAVPath != "")
 	if err != nil {
 		return nil, err
 	}
