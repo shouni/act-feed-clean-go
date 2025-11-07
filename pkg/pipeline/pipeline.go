@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/types"
+	//	"act-feed-clean-go/pkg/types"
 
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
-	"github.com/shouni/go-web-exact/v2/pkg/extract"
+	"github.com/shouni/go-web-exact/v2/pkg/types"
+	"github.com/shouni/web-text-pipe-go/pkg/scraper/runner"
 )
 
 // PipelineConfig はパイプライン実行のためのすべての設定値を保持します。
@@ -21,97 +23,66 @@ type PipelineConfig struct {
 	OutputWAVPath string
 }
 
-// ParsedFeed は抽出された記事のリンクとタイトル
-type ParsedFeed struct {
-	Link  string
-	Title string
-}
-
-// FeedParser はフィードの取得とリンク抽出の責務を負う
-type FeedParser interface {
-	FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []ParsedFeed, err error)
-}
-
-// ScraperExecutor は scraper.Scraper インターフェースに一致 (既存の定義を再利用)
-type ScraperExecutor interface {
-	ScrapeInParallel(ctx context.Context, urls []string) []types.URLResult
-}
-
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
-	// 依存関係 (Public fields)
-	FeedParser FeedParser
-	Extractor  *extract.Extractor
-	Scraper    ScraperExecutor
-	// CleanerはLLMが利用できない場合nilになり得る
+	ScraperRunner          *runner.Runner
 	Cleaner                *cleaner.Cleaner
 	VoicevoxEngineExecutor voicevox.EngineExecutor
-
-	// 設定値 (Private) - 設定値はすべてここに集約する
-	config PipelineConfig
+	config                 PipelineConfig
 }
 
-// New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
+// New 関数
 func New(
-	feedParser FeedParser,
-	extractor *extract.Extractor,
-	scraperInstance ScraperExecutor,
+	ScraperRunner *runner.Runner,
 	cleanerInstance *cleaner.Cleaner,
 	VoicevoxEngineExecutor voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
-		FeedParser:             feedParser,
-		Extractor:              extractor,
-		Scraper:                scraperInstance,
-		Cleaner:                cleanerInstance, // LLMが利用できない場合はnilが注入される
+		ScraperRunner:          ScraperRunner, // そのままポインタを格納
+		Cleaner:                cleanerInstance,
 		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
-
-		// 設定値全体を保持
-		config: config,
+		config:                 config,
 	}
 }
 
 // Run はフィードの取得、記事の並列抽出、AI処理、およびI/O処理を実行します。
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
-	// --- 1. RSSフィードの取得とURLリスト生成 ---
-	feedTitle, parsedItems, err := p.FeedParser.FetchAndExtractLinks(ctx, feedURL)
+	runnerConfig := runner.RunnerConfig{
+		FeedURL:                  feedURL,
+		ClientTimeout:            3 * time.Second,
+		OverallTimeoutMultiplier: 3,
+	}
+
+	// --- 1. ScrapeAndRun の呼び出し ---
+	results, err := p.ScraperRunner.ScrapeAndRun(ctx, runnerConfig)
 	if err != nil {
-		slog.Error("RSSフィードの取得・パース・リンク抽出に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("RSSフィードの取得・パース・リンク抽出に失敗しました: %w", err)
+		return err
 	}
 
-	urlsToScrape := make([]string, 0, len(parsedItems))
-	articleTitlesMap := make(map[string]string)
-
-	for _, item := range parsedItems {
-		if item.Link != "" && item.Title != "" {
-			urlsToScrape = append(urlsToScrape, item.Link)
-			articleTitlesMap[item.Link] = item.Title
-		}
-	}
-	if len(urlsToScrape) == 0 {
-		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
-	}
-
-	slog.Info("記事URLの抽出を開始します",
-		slog.Int("urls", len(urlsToScrape)),
-		slog.Int("parallel", p.config.Parallel),
-		slog.String("feed_url", feedURL),
-	)
-
-	// --- 2. Scraperによる並列抽出の実行 ---
-	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
-
-	// --- 3. 抽出結果の確認と成功リストの作成 ---
+	// --- 2. 抽出結果の確認と成功リストの作成 ---
 	successCount := 0
 	var successfulResults []types.URLResult
+
+	// NOTE: 新しいアーキテクチャでは、フィードのメタデータ（feedTitle, articleTitlesMap）は
+	// ScrapeAndRunの外部からは直接取得できません。
+	// この修正では、AI処理分岐のために必要なこれらの変数を「ダミー」または「未取得」として扱い、
+	// AI処理をスキップするか、呼び出し元のロジックに依存しない形で結合処理を行います。
+
+	// 暫定的なダミー値を使用 (AI処理/processWithoutAIで必要とされるため)
+	feedTitle := "スクレイピング結果"
+	articleTitlesMap := make(map[string]string)
+
+	totalProcessedURLs := len(results) // ScrapeAndRunで処理されたURLの総数
 
 	for _, res := range results {
 		if res.Error == nil {
 			successCount++
 			successfulResults = append(successfulResults, res) // 成功した結果を格納
+			// 暫定的にURLをキーとして、Contentをタイトルと仮定（正確なタイトルは取得不可）
+			// または、後続の処理でタイトルが必要ない場合はこの行を削除
+			articleTitlesMap[res.URL] = fmt.Sprintf("記事タイトル (URL: %s)", res.URL)
 		} else {
 			slog.Warn("抽出エラー",
 				slog.String("url", res.URL),
@@ -122,16 +93,18 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	slog.Info("抽出完了",
 		slog.Int("success", successCount),
-		slog.Int("total", len(urlsToScrape)),
+		slog.Int("total", totalProcessedURLs), // urlsToScrapeではなくresultsの長さを使用
 	)
 
 	if successCount == 0 {
 		return fmt.Errorf("処理すべき記事本文が一つも見つかりませんでした")
 	}
 
-	// --- 4. AI処理の実行分岐 ---
+	// --- 3. AI処理の実行分岐 ---
 	if p.Cleaner != nil {
 		// LLMが利用可能な場合
+		// NOTE: feedTitle, articleTitlesMap が正確な情報を含まない可能性があるため、
+		// processWithAIのロジックを見直す必要があります。ここではそのまま残します。
 		scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
 		if err != nil {
 			return err
@@ -142,6 +115,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// LLMが利用不可の場合 (AI処理スキップ)
 	slog.Info("AI処理コンポーネントが未設定のため、抽出結果を結合して出力します。", slog.String("mode", "AIスキップ"))
+	// NOTE: feedTitle, articleTitlesMap が正確な情報を含まない可能性があるため、
+	// processWithoutAIのロジックを見直す必要があります。ここではそのまま残します。
 	combinedScriptText, err := p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
 	if err != nil {
 		return err

@@ -1,61 +1,19 @@
 package cmd
 
 import (
+	"act-feed-clean-go/pkg/cleaner"
+	"act-feed-clean-go/pkg/pipeline"
 	"context"
 	"fmt"
 	"log/slog"
-	"time"
-
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/pipeline"
-	"act-feed-clean-go/pkg/scraper"
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
 	"github.com/shouni/go-cli-base"
-	"github.com/shouni/go-http-kit/pkg/feed"
-	"github.com/shouni/go-http-kit/pkg/httpkit"
+	"github.com/shouni/web-text-pipe-go/pkg/scraper/builder"
+	"github.com/shouni/web-text-pipe-go/pkg/scraper/runner"
+
 	"github.com/shouni/go-voicevox/pkg/voicevox"
-	"github.com/shouni/go-web-exact/v2/pkg/extract"
 )
-
-// ----------------------------------------------------------------------
-// アダプター構造体 (FeedParserインターフェースを満たすための修正)
-// ----------------------------------------------------------------------
-
-// FeedParserAdapter は *feed.Parser をラップし、
-// pipeline.FeedParser インターフェースを満たすために必要な
-// FetchAndExtractLinks メソッドを実装します。
-type FeedParserAdapter struct {
-	parser *feed.Parser
-}
-
-// FetchAndExtractLinks は pipeline.FeedParser インターフェースを実装します。
-func (a *FeedParserAdapter) FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []pipeline.ParsedFeed, err error) {
-	// 内部の FetchAndParse を呼び出す
-	f, err := a.parser.FetchAndParse(ctx, feedURL)
-	if err != nil {
-		return "", nil, err
-	}
-
-	feedTitle = f.Title
-
-	// 記事のタイトルとリンクを抽出
-	extractedItems := make([]pipeline.ParsedFeed, 0, len(f.Items))
-	for _, item := range f.Items {
-		if item.Link != "" && item.Title != "" {
-			extractedItems = append(extractedItems, pipeline.ParsedFeed{
-				Link:  item.Link,
-				Title: item.Title,
-			})
-		}
-	}
-
-	if len(extractedItems) == 0 {
-		return feedTitle, nil, fmt.Errorf("フィード (%s) から有効な記事URLが見つかりませんでした", feedTitle)
-	}
-
-	return feedTitle, extractedItems, nil
-}
 
 // ----------------------------------------------------------------------
 // 構造体と定数
@@ -63,24 +21,10 @@ func (a *FeedParserAdapter) FetchAndExtractLinks(ctx context.Context, feedURL st
 
 // appDependencies はパイプライン実行に必要な全ての依存関係を保持する構造体です。
 type appDependencies struct {
-	FeedParser             pipeline.FeedParser
-	Extractor              *extract.Extractor
-	Scraper                scraper.Scraper
+	ScraperRunner          *runner.Runner
 	Cleaner                *cleaner.Cleaner
 	VoicevoxEngineExecutor voicevox.EngineExecutor
 	PipelineConfig         pipeline.PipelineConfig
-}
-
-// ヘルパー関数 (初期化)
-
-// createHTTPClient は HTTP クライアントの初期化ロジックを分離します。
-func createHTTPClient(scrapeTimeout time.Duration) *httpkit.Client {
-	// maxRetries を関数スコープに移動し、可読性と安全性を向上
-	const maxRetries = 3
-	clientOptions := []httpkit.ClientOption{
-		httpkit.WithMaxRetries(maxRetries),
-	}
-	return httpkit.New(scrapeTimeout, clientOptions...)
 }
 
 // 依存関係構築 (メイン責務)
@@ -95,34 +39,21 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		OutputWAVPath: f.OutputWAVPath,
 	}
 
-	// 1. HTTPクライアントの初期化
-	httpClient := createHTTPClient(f.HttpTimeout)
-	slog.Debug("HTTPクライアントを初期化しました", slog.Duration("timeout", f.HttpTimeout))
-
-	// 2. FeedParser の初期化 (HTTPClient に依存)
-	rawFeedParser := feed.NewParser(httpClient)
-	feedParserAdapterInstance := &FeedParserAdapter{
-		parser: rawFeedParser,
-	}
-
-	// 3. Extractorの初期化
-	extractor, err := extract.NewExtractor(httpClient)
+	// 1. Runnerを取得
+	scraperRunner, err := builder.BuildScraperRunner(f.HttpTimeout, f.Parallel)
 	if err != nil {
-		slog.Error("エクストラクタの初期化に失敗しました", slog.String("error", err.Error()))
-		return nil, fmt.Errorf("エクストラクタの初期化に失敗しました: %w", err)
+		slog.Error("scraperRunnerの初期化に失敗しました", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("scraperRunnerの初期化に失敗しました: %w", err)
 	}
 
-	// 4. Scraperの初期化
-	scraperInstance := scraper.NewParallelScraper(extractor, config.Parallel)
-
-	// 5. geminiの初期化
+	// 2. geminiの初期化
 	client, err := gemini.NewClientFromEnv(ctx)
 	if err != nil {
 		slog.Error("LLMクライアントの初期化に失敗しました。APIキーが設定されているか確認してください", slog.String("error", err.Error()))
 		return nil, fmt.Errorf("LLMクライアントの初期化に失敗しました: %w", err)
 	}
 
-	// グローバル変数ではなく、引数 f から CleanerConfig を使用
+	// 3. cleanerの初期化
 	cleanerInstance, err := cleaner.NewCleaner(
 		client,
 		f.CleanerConfig,
@@ -131,16 +62,14 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		return nil, fmt.Errorf("クリーナーの初期化に失敗しました: %w", err)
 	}
 
-	// 6. VOICEVOX Engineの初期化
+	// 4. VOICEVOX Engineの初期化
 	voicevoxExecutor, err := voicevox.NewEngineExecutor(ctx, f.HttpTimeout, config.OutputWAVPath != "")
 	if err != nil {
 		return nil, err
 	}
 
 	return &appDependencies{
-		FeedParser:             feedParserAdapterInstance,
-		Extractor:              extractor,
-		Scraper:                scraperInstance,
+		ScraperRunner:          scraperRunner,
 		Cleaner:                cleanerInstance,
 		VoicevoxEngineExecutor: voicevoxExecutor,
 		PipelineConfig:         config,

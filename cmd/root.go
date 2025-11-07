@@ -77,9 +77,7 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 
 	// 2. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
-		deps.FeedParser,
-		deps.Extractor,
-		deps.Scraper,
+		deps.ScraperRunner,
 		deps.Cleaner,
 		deps.VoicevoxEngineExecutor,
 		deps.PipelineConfig,
