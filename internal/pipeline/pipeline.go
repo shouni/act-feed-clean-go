@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/types"
+	"act-feed-clean-go/internal/cleaner"
 
 	"github.com/shouni/go-utils/iohandler"
 	"github.com/shouni/go-voicevox/pkg/voicevox"
-	"github.com/shouni/go-web-exact/v2/pkg/extract"
+	"github.com/shouni/go-web-exact/v2/pkg/types"
+	"github.com/shouni/web-text-pipe-go/pkg/scraper/runner"
 )
 
 // PipelineConfig はパイプライン実行のためのすべての設定値を保持します。
@@ -19,94 +20,60 @@ type PipelineConfig struct {
 	Parallel      int
 	Verbose       bool
 	OutputWAVPath string
-}
-
-// ParsedFeed は抽出された記事のリンクとタイトル
-type ParsedFeed struct {
-	Link  string
-	Title string
-}
-
-// FeedParser はフィードの取得とリンク抽出の責務を負う
-type FeedParser interface {
-	FetchAndExtractLinks(ctx context.Context, feedURL string) (feedTitle string, items []ParsedFeed, err error)
-}
-
-// ScraperExecutor は scraper.Scraper インターフェースに一致 (既存の定義を再利用)
-type ScraperExecutor interface {
-	ScrapeInParallel(ctx context.Context, urls []string) []types.URLResult
+	ClientTimeout time.Duration
 }
 
 // Pipeline は記事の取得から結合までの一連の流れを管理します。
 type Pipeline struct {
-	// 依存関係 (Public fields)
-	FeedParser FeedParser
-	Extractor  *extract.Extractor
-	Scraper    ScraperExecutor
-	// CleanerはLLMが利用できない場合nilになり得る
+	ScraperRunner          *runner.Runner
 	Cleaner                *cleaner.Cleaner
 	VoicevoxEngineExecutor voicevox.EngineExecutor
-
-	// 設定値 (Private) - 設定値はすべてここに集約する
-	config PipelineConfig
+	config                 PipelineConfig
 }
 
-// New は新しい Pipeline インスタンスを初期化し、依存関係を注入します。
+// New は新しい Pipeline インスタンスを初期化し、必要な依存関係と設定を注入します。
 func New(
-	feedParser FeedParser,
-	extractor *extract.Extractor,
-	scraperInstance ScraperExecutor,
+	ScraperRunner *runner.Runner,
 	cleanerInstance *cleaner.Cleaner,
 	VoicevoxEngineExecutor voicevox.EngineExecutor,
 	config PipelineConfig,
 ) *Pipeline {
 	return &Pipeline{
-		FeedParser:             feedParser,
-		Extractor:              extractor,
-		Scraper:                scraperInstance,
-		Cleaner:                cleanerInstance, // LLMが利用できない場合はnilが注入される
+		ScraperRunner:          ScraperRunner,
+		Cleaner:                cleanerInstance,
 		VoicevoxEngineExecutor: VoicevoxEngineExecutor,
-
-		// 設定値全体を保持
-		config: config,
+		config:                 config,
 	}
 }
 
 // Run はフィードの取得、記事の並列抽出、AI処理、およびI/O処理を実行します。
 func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
-	// --- 1. RSSフィードの取得とURLリスト生成 ---
-	feedTitle, parsedItems, err := p.FeedParser.FetchAndExtractLinks(ctx, feedURL)
+	runnerConfig := runner.RunnerConfig{
+		FeedURL:                  feedURL,
+		ClientTimeout:            p.config.ClientTimeout,
+		OverallTimeoutMultiplier: 3,
+	}
+
+	// --- 1. ScrapeAndRun の呼び出し ---
+	// 修正: 戻り値の型を *runner.RunnerResult に変更
+	runnerResult, err := p.ScraperRunner.ScrapeAndRun(ctx, runnerConfig)
 	if err != nil {
-		slog.Error("RSSフィードの取得・パース・リンク抽出に失敗しました", slog.String("error", err.Error()))
-		return fmt.Errorf("RSSフィードの取得・パース・リンク抽出に失敗しました: %w", err)
+		return err
 	}
 
-	urlsToScrape := make([]string, 0, len(parsedItems))
-	articleTitlesMap := make(map[string]string)
-
-	for _, item := range parsedItems {
-		if item.Link != "" && item.Title != "" {
-			urlsToScrape = append(urlsToScrape, item.Link)
-			articleTitlesMap[item.Link] = item.Title
-		}
-	}
-	if len(urlsToScrape) == 0 {
-		return fmt.Errorf("フィードから有効な記事URLが見つかりませんでした")
-	}
-
-	slog.Info("記事URLの抽出を開始します",
-		slog.Int("urls", len(urlsToScrape)),
-		slog.Int("parallel", p.config.Parallel),
-		slog.String("feed_url", feedURL),
-	)
-
-	// --- 2. Scraperによる並列抽出の実行 ---
-	results := p.Scraper.ScrapeInParallel(ctx, urlsToScrape)
-
-	// --- 3. 抽出結果の確認と成功リストの作成 ---
+	// --- 2. 抽出結果の確認と成功リストの作成 ---
 	successCount := 0
 	var successfulResults []types.URLResult
+
+	// 修正: runnerResult からメタデータと結果を取得
+	feedTitle := runnerResult.FeedTitle
+	articleTitlesMap := runnerResult.TitlesMap
+	// 処理対象のURL結果リスト
+	results := runnerResult.Results
+
+	// ScrapeAndRun で処理されたURLの総数 (results の長さを使用)
+	totalProcessedURLs := len(results)
 
 	for _, res := range results {
 		if res.Error == nil {
@@ -122,7 +89,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	slog.Info("抽出完了",
 		slog.Int("success", successCount),
-		slog.Int("total", len(urlsToScrape)),
+		slog.Int("total", totalProcessedURLs),
 	)
 
 	if successCount == 0 {

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"unicode"
 
-	"act-feed-clean-go/pkg/types"
 	"act-feed-clean-go/prompts"
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
+	"github.com/shouni/go-web-exact/v2/pkg/types"
 )
 
 // ContentSeparator は、結合された複数の文書間を区切るための明確な区切り文字です。

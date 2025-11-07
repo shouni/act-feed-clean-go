@@ -1,13 +1,13 @@
 package cmd
 
 import (
+	"act-feed-clean-go/internal/pipeline"
 	"context"
 	"log/slog"
 	"os"
 	"time"
 
-	"act-feed-clean-go/pkg/cleaner"
-	"act-feed-clean-go/pkg/pipeline"
+	"act-feed-clean-go/internal/cleaner"
 
 	"github.com/shouni/go-cli-base"
 	"github.com/spf13/cobra"
@@ -75,14 +75,19 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	pipelineConfig := pipeline.PipelineConfig{
+		Parallel:      Flags.Parallel,
+		OutputWAVPath: Flags.OutputWAVPath,
+		ClientTimeout: Flags.HttpTimeout,
+		Verbose:       clibase.Flags.Verbose,
+	}
+
 	// 2. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
-		deps.FeedParser,
-		deps.Extractor,
-		deps.Scraper,
+		deps.ScraperRunner,
 		deps.Cleaner,
 		deps.VoicevoxEngineExecutor,
-		deps.PipelineConfig,
+		pipelineConfig,
 	)
 
 	// 3. Pipelineの実行

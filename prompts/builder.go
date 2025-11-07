@@ -28,6 +28,7 @@ var zundametanDuetPromptTemplate string // VOICEVOXスクリプト生成用テ�
 // ----------------------------------------------------------------
 
 type MapTemplateData struct {
+	Title       string
 	SegmentText string
 }
 
