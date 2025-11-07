@@ -30,12 +30,6 @@ type appDependencies struct {
 // newAppDependencies は全ての依存関係の構築（ワイヤリング）を実行します。
 // フラグ情報は引数 f から一貫して取得されます。
 func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, error) {
-	config := pipeline.PipelineConfig{
-		Parallel:      f.Parallel,
-		OutputWAVPath: f.OutputWAVPath,
-		ClientTimeout: f.HttpTimeout,
-	}
-
 	// 1. scraperRunnerの初期化
 	scraperRunner, err := builder.BuildScraperRunner(f.HttpTimeout, f.Parallel)
 	if err != nil {
@@ -69,6 +63,5 @@ func newAppDependencies(ctx context.Context, f RunFlags) (*appDependencies, erro
 		ScraperRunner:          scraperRunner,
 		Cleaner:                cleanerInstance,
 		VoicevoxEngineExecutor: voicevoxExecutor,
-		PipelineConfig:         config,
 	}, nil
 }

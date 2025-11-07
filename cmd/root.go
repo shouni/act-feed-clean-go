@@ -75,12 +75,18 @@ func runCmdFunc(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	pipelineConfig := pipeline.PipelineConfig{
+		Parallel:      Flags.Parallel,
+		OutputWAVPath: Flags.OutputWAVPath,
+		Verbose:       clibase.Flags.Verbose, // clibaseから値を取得して設定
+	}
+
 	// 2. Pipelineインスタンスを生成（依存関係を注入）
 	pipelineInstance := pipeline.New(
 		deps.ScraperRunner,
 		deps.Cleaner,
 		deps.VoicevoxEngineExecutor,
-		deps.PipelineConfig,
+		pipelineConfig,
 	)
 
 	// 3. Pipelineの実行
