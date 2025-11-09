@@ -56,7 +56,6 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	}
 
 	// --- 1. ScrapeAndRun の呼び出し ---
-	// 修正: 戻り値の型を *runner.RunnerResult に変更
 	runnerResult, err := p.ScraperRunner.ScrapeAndRun(ctx, runnerConfig)
 	if err != nil {
 		return err
@@ -66,8 +65,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	successCount := 0
 	var successfulResults []types.URLResult
 
-	// 修正: runnerResult からメタデータと結果を取得
-	feedTitle := runnerResult.FeedTitle
+	//	feedTitle := runnerResult.FeedTitle
 	articleTitlesMap := runnerResult.TitlesMap
 	// 処理対象のURL結果リスト
 	results := runnerResult.Results
@@ -99,7 +97,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	// --- 4. AI処理の実行分岐 ---
 	if p.Cleaner != nil {
 		// LLMが利用可能な場合
-		scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
+		//		scriptText, err := p.processWithAI(ctx, feedTitle, successfulResults, articleTitlesMap)
+		scriptText, err := p.processWithAI(ctx, successfulResults, articleTitlesMap)
 		if err != nil {
 			return err
 		}
@@ -109,7 +108,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 
 	// LLMが利用不可の場合 (AI処理スキップ)
 	slog.Info("AI処理コンポーネントが未設定のため、抽出結果を結合して出力します。", slog.String("mode", "AIスキップ"))
-	combinedScriptText, err := p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
+	//	combinedScriptText, err := p.processWithoutAI(feedTitle, successfulResults, articleTitlesMap)
+	combinedScriptText, err := p.processWithoutAI(successfulResults, articleTitlesMap)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,8 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 // ----------------------------------------------------------------------
 
 // processWithAI は AI による Map-Reduce、Summary、Script Generation を実行します。
-func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results []types.URLResult, titlesMap map[string]string) (string, error) {
+// func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results []types.URLResult, titlesMap map[string]string) (string, error) {
+func (p *Pipeline) processWithAI(ctx context.Context, results []types.URLResult, titlesMap map[string]string) (string, error) {
 	slog.Info("LLM処理開始", slog.String("phase", "Map-Reduce"))
 
 	// Map-Reduce のための結合テキスト構築
@@ -136,20 +137,24 @@ func (p *Pipeline) processWithAI(ctx context.Context, feedTitle string, results 
 	}
 
 	// Final Summary
-	title := cleaner.ExtractTitleFromMarkdown(reduceResult)
-	if title == "" {
-		slog.Warn("AIによるタイトル抽出に失敗しました。フィードのタイトルを代替として使用します。", slog.String("fallback_title", feedTitle))
-		title = feedTitle
-	}
+	/*
+		title := cleaner.ExtractTitleFromMarkdown(reduceResult)
+		if title == "" {
+			slog.Warn("AIによるタイトル抽出に失敗しました。フィードのタイトルを代替として使用します。", slog.String("fallback_title", feedTitle))
+			title = feedTitle
+		}
+	*/
 
-	finalSummary, err := p.Cleaner.GenerateFinalSummary(ctx, title, reduceResult)
+	//	finalSummary, err := p.Cleaner.GenerateFinalSummary(ctx, title, reduceResult)
+	finalSummary, err := p.Cleaner.GenerateFinalSummary(ctx, reduceResult)
 	if err != nil {
 		slog.Error("Final Summaryの生成に失敗しました", slog.String("error", err.Error()))
 		return "", fmt.Errorf("Final Summaryの生成に失敗しました: %w", err)
 	}
 
 	// Script Generation
-	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, title, finalSummary)
+	//	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, title, finalSummary)
+	scriptText, err := p.Cleaner.GenerateScriptForVoicevox(ctx, finalSummary)
 	if err != nil {
 		slog.Error("VOICEVOXスクリプトの生成に失敗しました", slog.String("error", err.Error()))
 		return "", fmt.Errorf("VOICEVOXスクリプトの生成に失敗しました: %w", err)
@@ -180,9 +185,10 @@ func (p *Pipeline) handleOutput(ctx context.Context, scriptText string) error {
 }
 
 // processWithoutAI は LLMAPIKeyがない場合に実行される処理
-func (p *Pipeline) processWithoutAI(feedTitle string, successfulResults []types.URLResult, titlesMap map[string]string) (string, error) {
+// func (p *Pipeline) processWithoutAI(feedTitle string, successfulResults []types.URLResult, titlesMap map[string]string) (string, error) {
+func (p *Pipeline) processWithoutAI(successfulResults []types.URLResult, titlesMap map[string]string) (string, error) {
 	var combinedTextBuilder strings.Builder
-	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
+	//	combinedTextBuilder.WriteString(fmt.Sprintf("# %s\n\n", feedTitle))
 
 	for _, res := range successfulResults {
 		articleTitle := titlesMap[res.URL]

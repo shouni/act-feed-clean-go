@@ -136,11 +136,12 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 }
 
 // GenerateFinalSummary は、中間統合要約を元に、簡潔な最終要約を生成します。
-func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, intermediateSummary string) (string, error) {
+// func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, intermediateSummary string) (string, error) {
+func (c *Cleaner) GenerateFinalSummary(ctx context.Context, intermediateSummary string) (string, error) {
 	slog.Info("Final Summary Generation（最終要約）を開始します。")
 
 	summaryData := prompts.FinalSummaryTemplateData{
-		Title:               title,
+		//		Title:               title,
 		IntermediateSummary: intermediateSummary,
 	}
 	prompt, err := c.prompt.FinalSummaryBuilder.BuildFinalSummary(summaryData)
@@ -159,11 +160,12 @@ func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, interm
 }
 
 // GenerateScriptForVoicevox は、最終要約を元に、VOICEVOXエンジン向けのスクリプトを生成します。
-func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, finalSummary string) (string, error) {
+// func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, finalSummary string) (string, error) {
+func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, finalSummary string) (string, error) {
 	slog.Info("Script Generation（スクリプト作成）を開始します。")
 
 	scriptData := prompts.ScriptTemplateData{
-		Title:            title,
+		//		Title:            title,
 		FinalSummaryText: finalSummary,
 	}
 	prompt, err := c.prompt.ScriptBuilder.BuildScript(scriptData)

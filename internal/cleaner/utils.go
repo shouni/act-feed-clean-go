@@ -84,6 +84,7 @@ func ExtractTextBetweenTags(text, startTag, endTag string) string {
 	return strings.TrimSpace(text[startIndex:endIndex])
 }
 
+/*
 // ExtractTitleFromMarkdown は、Markdownテキストの最初の # 見出しの内容を抽出します。
 func ExtractTitleFromMarkdown(markdownText string) string {
 	lines := strings.Split(markdownText, "\n")
@@ -99,6 +100,7 @@ func ExtractTitleFromMarkdown(markdownText string) string {
 	}
 	return ""
 }
+*/
 
 // ----------------------------------------------------------------
 // Cleaner 内部ヘルパーメソッド
@@ -199,7 +201,6 @@ func (c *Cleaner) processSegmentsInParallel(ctx context.Context, segments []stri
 		go func(index int, seg string) {
 			defer wg.Done()
 
-			// 💡 レートリミットの待機
 			// Wait(ctx) は、レートリミットに達した場合に待機し、ctx.Done() が発火した場合はエラーを返す。
 			if err := limiter.Wait(ctx); err != nil {
 				resultsChan <- struct {

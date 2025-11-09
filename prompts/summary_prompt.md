@@ -25,10 +25,6 @@
 -   出力は必ず以下の **<SUMMARY_START>** と **<SUMMARY_END>** のマーカーで囲み、内部には最終的な要約テキストのみを含めてください。
 ---
 
-## 📰 元記事タイトル (Article Title)
-
-{{.Title}}
-
 ## 📝 中間統合要約 (Intermediate Summary Text)
 
 {{.IntermediateSummary}}

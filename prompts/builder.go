@@ -39,13 +39,13 @@ type ReduceTemplateData struct {
 
 // FinalSummaryTemplateData は中間要約を元に最終要約を作成する。
 type FinalSummaryTemplateData struct {
-	Title               string
+	//	Title               string
 	IntermediateSummary string // Reduceフェーズの結果（中間要約）
 }
 
 // ScriptTemplateData は最終要約を元にVOICEVOX用スクリプトを作成する。
 type ScriptTemplateData struct {
-	Title            string
+	//	Title            string
 	FinalSummaryText string // Final Summaryフェーズの結果
 }
 
