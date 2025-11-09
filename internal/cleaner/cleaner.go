@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
-	"unicode"
+	"time"
 
 	"act-feed-clean-go/prompts"
 
 	"github.com/shouni/go-ai-client/v2/pkg/ai/gemini"
-	"github.com/shouni/go-web-exact/v2/pkg/types"
 )
 
 // ContentSeparator は、結合された複数の文書間を区切るための明確な区切り文字です。
@@ -24,78 +22,42 @@ const DefaultSeparator = "\n\n"
 const MaxSegmentChars = 400000
 
 // ----------------------------------------------------------------
-// モデル名定数の定義
+// モデル名定数と設定
 // ----------------------------------------------------------------
 
-const DefaultModelName = "gemini-2.5-flash"
-
-// DefaultMapModelName は Mapフェーズのデフォルトモデル名です。
-const DefaultMapModelName = DefaultModelName
-
-// DefaultReduceModelName は Reduceフェーズのデフォルトモデル名です。
-const DefaultReduceModelName = DefaultModelName
-
-// DefaultSummaryModelName は FinalSummaryフェーズのデフォルトモデル名です。 (新規)
-const DefaultSummaryModelName = DefaultModelName
-
-// DefaultScriptModelName は ScriptGenerationフェーズのデフォルトモデル名です。 (新規)
-const DefaultScriptModelName = DefaultModelName
-
-// ----------------------------------------------------------------
-// Cleaner 構造体とコンストラクタ
-// ----------------------------------------------------------------
+const (
+	DefaultModelName = "gemini-2.5-flash"
+	// DefaultMapModelName は Mapフェーズのデフォルトモデル名です。
+	DefaultMapModelName = DefaultModelName
+	// DefaultReduceModelName は Reduceフェーズのデフォルトモデル名です。
+	DefaultReduceModelName = DefaultModelName
+	// DefaultSummaryModelName は FinalSummaryフェーズのデフォルトモデル名です。
+	DefaultSummaryModelName = DefaultModelName
+	// DefaultScriptModelName は ScriptGenerationフェーズのデフォルトモデル名です。
+	DefaultScriptModelName = DefaultModelName
+	// DefaultLLMRateLimit は、LLMへのリクエスト間の最小間隔です。
+	DefaultLLMRateLimit = 1000 * time.Millisecond
+)
 
 // Cleaner はコンテンツのクリーンアップと要約を担当します。
 type Cleaner struct {
 	client *gemini.Client // LLMクライアントを注入
-	prompt *PromptManager
+	prompt *PromptManager // prompt_manager.go で定義
 	config CleanerConfig
+	// LLMリクエストレートリミットの間隔
+	rateLimit time.Duration
 }
 
 type CleanerConfig struct {
-	MapModel     string // Mapフェーズで使用するGeminiモデル名
-	ReduceModel  string // Reduceフェーズで使用するGeminiモデル名
-	SummaryModel string // FinalSummaryフェーズで使用するGeminiモデル名
-	ScriptModel  string // ScriptGenerationフェーズで使用するGeminiモデル名
-	Verbose      bool   // 詳細ログを有効にするか
-}
-
-type PromptManager struct {
-	MapBuilder          *prompts.PromptBuilder
-	ReduceBuilder       *prompts.PromptBuilder
-	FinalSummaryBuilder *prompts.PromptBuilder
-	ScriptBuilder       *prompts.PromptBuilder
-	// 必要に応じて、configも保持できますが、ここでは初期化時にモデル名を使用
-}
-
-func NewPromptManager() (*PromptManager, error) {
-	mapBuilder := prompts.NewMapPromptBuilder()
-	if err := mapBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Map プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-	reduceBuilder := prompts.NewReducePromptBuilder()
-	if err := reduceBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Reduce プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-	finalSummaryBuilder := prompts.NewFinalSummaryPromptBuilder()
-	if err := finalSummaryBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Final Summary プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-	scriptBuilder := prompts.NewScriptPromptBuilder()
-	if err := scriptBuilder.Err(); err != nil {
-		return nil, fmt.Errorf("Script プロンプトビルダーの初期化に失敗しました: %w", err)
-	}
-
-	return &PromptManager{
-		MapBuilder:          mapBuilder,
-		ReduceBuilder:       reduceBuilder,
-		FinalSummaryBuilder: finalSummaryBuilder,
-		ScriptBuilder:       scriptBuilder,
-	}, nil
+	MapModel     string        // Mapフェーズで使用するGeminiモデル名
+	ReduceModel  string        // Reduceフェーズで使用するGeminiモデル名
+	SummaryModel string        // FinalSummaryフェーズで使用するGeminiモデル名
+	ScriptModel  string        // ScriptGenerationフェーズで使用するGeminiモデル名
+	LLMRateLimit time.Duration // LLMリクエストのレートリミット間隔
+	Verbose      bool          // 詳細ログを有効にするか
 }
 
 // NewCleaner は新しいCleanerインスタンスを作成し、依存関係とPromptBuilderを初期化します。
-// 修正: クライアントインスタンスと全モデル名を受け取ります。
 func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 	if client == nil {
 		return nil, fmt.Errorf("LLMクライアントはnilであってはなりません")
@@ -114,17 +76,21 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 	if config.ScriptModel == "" {
 		config.ScriptModel = DefaultScriptModelName
 	}
+	if config.LLMRateLimit <= 0 {
+		config.LLMRateLimit = DefaultLLMRateLimit
+	}
 
-	// PromptManagerを構築
+	// PromptManagerを構築 (prompt_manager.goで定義)
 	manager, err := NewPromptManager()
 	if err != nil {
 		return nil, fmt.Errorf("PromptManagerの初期化に失敗しました: %w", err)
 	}
 
 	return &Cleaner{
-		client: client, // 注入
-		prompt: manager,
-		config: config,
+		client:    client, // 注入
+		prompt:    manager,
+		config:    config,
+		rateLimit: config.LLMRateLimit,
 	}, nil
 }
 
@@ -132,64 +98,24 @@ func NewCleaner(client *gemini.Client, config CleanerConfig) (*Cleaner, error) {
 // メインロジック
 // ----------------------------------------------------------------
 
-// CombineContents は、成功した抽出結果の本文を効率的に結合します。
-func CombineContents(results []types.URLResult, titlesMap map[string]string) string {
-	var builder strings.Builder
-
-	// 成功した結果のみをフィルタリング
-	validResults := make([]types.URLResult, 0, len(results))
-	for _, res := range results {
-		if res.Error == nil && res.Content != "" {
-			validResults = append(validResults, res)
-		}
-	}
-
-	for i, res := range validResults {
-		// URLからタイトルを取得。見つからない場合はURL自体をタイトルとして使用
-		title := titlesMap[res.URL]
-		if title == "" {
-			title = res.URL // フォールバック
-		}
-
-		// 1. LLMがソースを識別するためのURLとインデックスを追記
-		builder.WriteString(fmt.Sprintf("--- SOURCE DOCUMENT %d ---\n", i+1))
-		builder.WriteString(fmt.Sprintf("TITLE: %s\n", title))
-		builder.WriteString(fmt.Sprintf("URL: %s\n\n", res.URL))
-
-		// 2. 本文を追加
-		builder.WriteString(res.Content)
-
-		// 3. 最後の文書でなければ明確な区切り文字を追加
-		if i < len(validResults)-1 {
-			builder.WriteString(ContentSeparator)
-		}
-	}
-
-	return builder.String()
-}
-
 // CleanAndStructureText は、コンテンツをMap-Reduceパターンで構造化します。
-// 修正: 中間統合要約 (Intermediate Summary) を生成する役割に変更し、apiKeyOverrideを削除
+// 最終的に中間統合要約を生成する役割を担います。
 func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string) (string, error) {
 
-	// 1. LLMクライアントの初期化 (削除)
-
-	// 2. Mapフェーズのためのテキスト分割
+	// 1. Mapフェーズのためのテキスト分割 (utils.goで定義)
 	segments := c.segmentText(combinedText, MaxSegmentChars)
 	slog.Info("テキストをセグメントに分割しました", slog.Int("segments", len(segments)))
 
-	// 3. Mapフェーズの実行（各セグメントの並列処理）
-	// c.client を使用
-	intermediateSummaries, err := c.processSegmentsInParallel(ctx, c.client, segments)
+	// 2. Mapフェーズの実行（各セグメントの並列処理）(utils.goで定義)
+	intermediateSummaries, err := c.processSegmentsInParallel(ctx, segments)
 	if err != nil {
-		// このエラーは Map-Reduce の最初のReduceが実行される前の、中間要約の結合テキストになる
 		return "", fmt.Errorf("コンテンツのセグメント処理（Mapフェーズ）中にエラーが発生しました: %w", err)
 	}
 
-	// 4. Reduceフェーズの準備：中間要約の結合
+	// 3. Reduceフェーズの準備：中間要約の結合
 	intermediateCombinedText := strings.Join(intermediateSummaries, "\n\n--- INTERMEDIATE SUMMARY END ---\n\n")
 
-	// 5. Reduceフェーズ：中間要約の統合と構造化のためのLLM呼び出し
+	// 4. Reduceフェーズ：中間要約の統合と構造化のためのLLM呼び出し
 	slog.Info("中間要約の結合が完了しました。Reduceフェーズ（中間統合要約）を開始します。")
 
 	// Reduce プロンプト（reduce_final_prompt.md）を使用して中間統合要約を作成
@@ -199,14 +125,13 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 		return "", fmt.Errorf("Reduce プロンプトの生成に失敗しました: %w", err)
 	}
 
-	// Reduceフェーズのモデル名に c.ReduceModelName を使用
+	// Reduceフェーズのモデル名に c.ReduceModel を使用
 	finalResponse, err := c.client.GenerateContent(ctx, finalPrompt, c.config.ReduceModel)
 	if err != nil {
 		return "", fmt.Errorf("LLM Reduce処理（中間統合要約）に失敗しました: %w", err)
 	}
 
 	// Reduceの結果（中間統合要約）を返します。
-	// このテキストは、次の FinalSummary の入力となります。
 	return finalResponse.Text, nil
 }
 
@@ -214,7 +139,6 @@ func (c *Cleaner) CleanAndStructureText(ctx context.Context, combinedText string
 func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, intermediateSummary string) (string, error) {
 	slog.Info("Final Summary Generation（最終要約）を開始します。")
 
-	// Final Summary プロンプト（final_summary_prompt.md）を使用して最終要約を作成
 	summaryData := prompts.FinalSummaryTemplateData{
 		Title:               title,
 		IntermediateSummary: intermediateSummary,
@@ -238,7 +162,6 @@ func (c *Cleaner) GenerateFinalSummary(ctx context.Context, title string, interm
 func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, finalSummary string) (string, error) {
 	slog.Info("Script Generation（スクリプト作成）を開始します。")
 
-	// Script プロンプト（zundametan_duet.md）を使用してスクリプトを作成
 	scriptData := prompts.ScriptTemplateData{
 		Title:            title,
 		FinalSummaryText: finalSummary,
@@ -254,220 +177,17 @@ func (c *Cleaner) GenerateScriptForVoicevox(ctx context.Context, title string, f
 		return "", fmt.Errorf("LLM Script Generation処理に失敗しました: %w", err)
 	}
 
+	// utils.goで定義されたヘルパー関数を使用
 	scriptText := ExtractTextBetweenTags(response.Text, "SCRIPT_START", "SCRIPT_END")
 
-	// 抽出に失敗した場合の処理（例: LLMがタグを出力しなかった場合）
 	if scriptText == "" {
 		slog.Warn("指定されたスクリプトマーカーが見つからないか、形式が不正です。LLMのレスポンス全体をスクリプトとして使用します。",
 			slog.String("startTag", "SCRIPT_START"),
 			slog.String("endTag", "SCRIPT_END"),
-			slog.String("llm_response_prefix", response.Text[:min(len(response.Text), 100)]), // レスポンスの一部をログに出力
+			slog.String("llm_response_prefix", response.Text[:min(len(response.Text), 100)]),
 		)
 		return response.Text, nil
 	}
 
-	// 抽出されたスクリプトを返す
 	return scriptText, nil
-}
-
-// ----------------------------------------------------------------
-// ヘルパー関数群
-// ----------------------------------------------------------------
-
-func ExtractTextBetweenTags(text, startTag, endTag string) string {
-	startMarker := fmt.Sprintf("<%s>", strings.ToUpper(startTag))
-	endMarker1 := fmt.Sprintf("</%s>", strings.ToUpper(endTag))
-	endMarker2 := fmt.Sprintf("<%s>", strings.ToUpper(endTag))
-
-	startIndex := strings.Index(text, startMarker)
-	if startIndex == -1 {
-		return ""
-	}
-	startIndex += len(startMarker)
-
-	// 最初に startIndex 以降で </SCRIPT_END> の位置を探す
-	endIndex := strings.Index(text[startIndex:], endMarker1)
-	if endIndex != -1 {
-		endIndex += startIndex // 全体文字列での位置に変換
-	} else {
-		// 見つからなければ startIndex 以降で <SCRIPT_END> の位置を探す
-		endIndex = strings.Index(text[startIndex:], endMarker2)
-		if endIndex != -1 {
-			endIndex += startIndex // 全体文字列での位置に変換
-		}
-	}
-
-	if endIndex == -1 || endIndex < startIndex {
-		return ""
-	}
-
-	return strings.TrimSpace(text[startIndex:endIndex])
-}
-
-// segmentText は、結合されたテキストを、安全な最大文字数を超えないように分割します。
-// (変更なし)
-func (c *Cleaner) segmentText(text string, maxChars int) []string {
-	var segments []string
-	current := []rune(text)
-
-	for len(current) > 0 {
-		if len(current) <= maxChars {
-			segments = append(segments, string(current))
-			break
-		}
-
-		segmentCandidateRunes := current[:maxChars]
-		segmentCandidate := string(segmentCandidateRunes)
-
-		splitIndex := maxChars // デフォルトはmaxCharsで強制分割
-		separatorFound := false
-
-		// 1. ContentSeparator (最高優先度) を探す
-		if lastSepIdx := strings.LastIndex(segmentCandidate, ContentSeparator); lastSepIdx != -1 {
-			potentialSplitIndex := lastSepIdx + len(ContentSeparator)
-			if potentialSplitIndex <= maxChars {
-				splitIndex = potentialSplitIndex
-				separatorFound = true
-			}
-		}
-
-		// 2. ContentSeparator が見つからない、または採用されなかった場合、一般的な改行(\n\n)を探す
-		if !separatorFound {
-			if lastSepIdx := strings.LastIndex(segmentCandidate, DefaultSeparator); lastSepIdx != -1 {
-				potentialSplitIndex := lastSepIdx + len(DefaultSeparator)
-				if potentialSplitIndex <= maxChars {
-					splitIndex = potentialSplitIndex
-					separatorFound = true
-				}
-			}
-		}
-
-		// 3. 意味的な区切り文字（句読点、スペース）を探し、より自然な場所で分割
-		if !separatorFound {
-			const lookback = 50
-			// 修正: 組み込みmax()関数を使用
-			start := max(0, len(segmentCandidateRunes)-lookback)
-
-			lastMeaningfulBreak := -1
-
-			for i := len(segmentCandidateRunes) - 1; i >= start; i-- {
-				r := segmentCandidateRunes[i]
-
-				if unicode.IsPunct(r) || unicode.IsSpace(r) {
-					lastMeaningfulBreak = i + 1
-					break
-				}
-			}
-
-			if lastMeaningfulBreak != -1 {
-				splitIndex = lastMeaningfulBreak
-				separatorFound = true
-			}
-		}
-
-		if !separatorFound {
-			if c.config.Verbose {
-				slog.Warn("分割点で適切な区切りが見つかりませんでした。強制的に分割します。", slog.Int("max_chars", maxChars))
-			}
-			splitIndex = maxChars
-		}
-
-		segments = append(segments, string(current[:splitIndex]))
-		current = current[splitIndex:]
-	}
-
-	return segments
-}
-
-// processSegmentsInParallel は Mapフェーズを並列処理します。
-func (c *Cleaner) processSegmentsInParallel(ctx context.Context, client *gemini.Client, segments []string) ([]string, error) {
-	var wg sync.WaitGroup
-
-	// segmentIndex, summary, error を格納するチャネル
-	resultsChan := make(chan struct {
-		index   int
-		summary string
-		err     error
-	}, len(segments))
-
-	for i, segment := range segments {
-		wg.Add(1)
-
-		go func(index int, seg string) {
-			defer wg.Done()
-
-			mapData := prompts.MapTemplateData{SegmentText: seg}
-			prompt, err := c.prompt.MapBuilder.BuildMap(mapData)
-			if err != nil {
-				resultsChan <- struct {
-					index   int
-					summary string
-					err     error
-				}{index: index + 1, summary: "", err: fmt.Errorf("プロンプト生成失敗: %w", err)}
-				return
-			}
-
-			// Mapフェーズのモデル名に c.MapModelName を使用
-			response, err := client.GenerateContent(ctx, prompt, c.config.MapModel)
-
-			if err != nil {
-				resultsChan <- struct {
-					index   int
-					summary string
-					err     error
-				}{index: index + 1, summary: "", err: fmt.Errorf("LLM処理失敗: %w", err)}
-				return
-			}
-
-			resultsChan <- struct {
-				index   int
-				summary string
-				err     error
-			}{index: index + 1, summary: response.Text, err: nil}
-		}(i, segment)
-	}
-
-	wg.Wait()
-	close(resultsChan)
-
-	// エラー蓄積ロジック
-	var summaries []string
-	var errorMessages []string
-
-	for res := range resultsChan {
-		if res.err != nil {
-			// エラーが発生した場合、エラーメッセージを蓄積
-			errorMessages = append(errorMessages, fmt.Sprintf("セグメント %d: %v", res.index, res.err))
-		} else {
-			// 成功した場合、要約を蓄積
-			summaries = append(summaries, res.summary)
-		}
-	}
-
-	// 蓄積されたエラーをチェックし、あれば単一のエラーとして結合して返す
-	if len(errorMessages) > 0 {
-		return nil, fmt.Errorf("Mapフェーズで %d 件のエラーが発生しました:\n- %s",
-			len(errorMessages),
-			strings.Join(errorMessages, "\n- "))
-	}
-
-	return summaries, nil
-}
-
-// ExtractTitleFromMarkdown は、Markdownテキストの最初の # 見出しの内容を抽出します。
-// 例: "# 新しい技術の動向" -> "新しい技術の動向"
-func ExtractTitleFromMarkdown(markdownText string) string {
-	lines := strings.Split(markdownText, "\n")
-	for _, line := range lines {
-		// 先頭が "# " で始まる行を探す
-		if strings.HasPrefix(line, "# ") {
-			// "# " を取り除き、前後のスペースをトリム
-			title := strings.TrimSpace(line[2:])
-			if title != "" {
-				return title
-			}
-		}
-	}
-	// 見つからない場合は空文字列を返す
-	return ""
 }

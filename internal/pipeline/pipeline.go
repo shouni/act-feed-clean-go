@@ -52,7 +52,7 @@ func (p *Pipeline) Run(ctx context.Context, feedURL string) error {
 	runnerConfig := runner.RunnerConfig{
 		FeedURL:                  feedURL,
 		ClientTimeout:            p.config.ClientTimeout,
-		OverallTimeoutMultiplier: 3,
+		OverallTimeoutMultiplier: 10,
 	}
 
 	// --- 1. ScrapeAndRun の呼び出し ---
